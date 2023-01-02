@@ -76,10 +76,12 @@ public class ReplyMessageProcessor extends AbstractSendMessageProcessor implemen
         SendMessageRequestHeader requestHeader = null;
         switch (request.getCode()) {
             case RequestCode.SEND_REPLY_MESSAGE_V2:
+                //yangyc 回送消息
                 requestHeaderV2 =
                     (SendMessageRequestHeaderV2) request
                         .decodeCommandCustomHeader(SendMessageRequestHeaderV2.class);
             case RequestCode.SEND_REPLY_MESSAGE:
+                //yangyc 回送消息
                 if (null == requestHeaderV2) {
                     requestHeader =
                         (SendMessageRequestHeader) request

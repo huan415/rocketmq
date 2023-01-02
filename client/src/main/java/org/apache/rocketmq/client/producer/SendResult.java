@@ -20,11 +20,16 @@ import com.alibaba.fastjson.JSON;
 import org.apache.rocketmq.common.message.MessageQueue;
 
 public class SendResult {
+    //yangyc-main enum 枚举  SEND_OK、FLUSH_DISK_TIMEOUT、FLUSH_SLAVE_TIMEOUT、SLAVE_NOT_AVAILABLE
     private SendStatus sendStatus;
+    //yangyc-main 客户端生成的 msgId 规则：前缀 + 内容
+    //    前缀：ip地址，进程号，classLoader的hashcode
+    //    内存：时间差（当前时间减去当前一日），计算器
     private String msgId;
     private MessageQueue messageQueue;
     private long queueOffset;
     private String transactionId;
+    //yangyc-main 服务器端生成的消息ID: brokerHost地址 + msgCommitOffset
     private String offsetMsgId;
     private String regionId;
     private boolean traceOn = true;

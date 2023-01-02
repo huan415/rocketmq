@@ -87,35 +87,46 @@ import org.apache.rocketmq.remoting.protocol.RemotingCommand;
 public class MQClientInstance {
     private final static long LOCK_TIMEOUT_MILLIS = 3000;
     private final InternalLogger log = ClientLogger.getLog();
-    private final ClientConfig clientConfig;
-    private final int instanceIndex;
-    private final String clientId;
-    private final long bootTimestamp = System.currentTimeMillis();
-    private final ConcurrentMap<String/* group */, MQProducerInner> producerTable = new ConcurrentHashMap<String, MQProducerInner>();
-    private final ConcurrentMap<String/* group */, MQConsumerInner> consumerTable = new ConcurrentHashMap<String, MQConsumerInner>();
+    private final ClientConfig clientConfig; //yangyc 客户端配置
+    private final int instanceIndex; //yangyc 索引值, 一般是0。因为客户端实例 一般都是一个进程只有一个实例
+    private final String clientId; //yangyc 客户端 ID ip@pid
+    private final long bootTimestamp = System.currentTimeMillis();  //yangyc 客户端启动时间
+    private final ConcurrentMap<String/* group */, MQProducerInner> producerTable = new ConcurrentHashMap<String, MQProducerInner>(); //yangyc-main 生产者映射表，key:组名 value: 生产者
+    private final ConcurrentMap<String/* group */, MQConsumerInner> consumerTable = new ConcurrentHashMap<String, MQConsumerInner>(); //yangyc-main 消费组映射表，key:组名 value: 消费组
     private final ConcurrentMap<String/* group */, MQAdminExtInner> adminExtTable = new ConcurrentHashMap<String, MQAdminExtInner>();
-    private final NettyClientConfig nettyClientConfig;
+    private final NettyClientConfig nettyClientConfig; //yangyc 客户端网络层（netty）的配置
+    //yangyc-main 核心的一个API实现，它几乎包含了所有服务器API。它的作用：1.将业务层数据转换成网络层的 RemotingCammand 对象。2. 使用内部的 NettyRemotingClient 的 invoke 系列方法完成网络 IO
     private final MQClientAPIImpl mQClientAPIImpl;
     private final MQAdminImpl mQAdminImpl;
+    //yangyc-main 客户端本地路由数据映射表。key:主题名称  value:主题路由数据
     private final ConcurrentMap<String/* Topic */, TopicRouteData> topicRouteTable = new ConcurrentHashMap<String, TopicRouteData>();
     private final Lock lockNamesrv = new ReentrantLock();
     private final Lock lockHeartbeat = new ReentrantLock();
+    //yangyc-main broker 物理节点映射表。key: brokerName 逻辑层面的东西; value: map ==>【 key：brokerId value:addr ip:端口】
     private final ConcurrentMap<String/* Broker Name */, HashMap<Long/* brokerId */, String/* address */>> brokerAddrTable =
         new ConcurrentHashMap<String, HashMap<Long, String>>();
+    //yangyc broker 物理节点版本映射表。key: brokerName 逻辑层面的东西; value: map ==>【 key：addr ip:端口 value:版本号】
     private final ConcurrentMap<String/* Broker Name */, HashMap<String/* address */, Integer>> brokerVersionTable =
         new ConcurrentHashMap<String, HashMap<String, Integer>>();
+    //yangyc 单线程的调度线程池, 用于执行定时任务
     private final ScheduledExecutorService scheduledExecutorService = Executors.newSingleThreadScheduledExecutor(new ThreadFactory() {
         @Override
         public Thread newThread(Runnable r) {
             return new Thread(r, "MQClientFactoryScheduledThread");
         }
     });
+    //yangyc 客户端协议处理器, 用于处理 IO 事件
     private final ClientRemotingProcessor clientRemotingProcessor;
+    //yangyc 拉消息服务
     private final PullMessageService pullMessageService;
+    //yangyc 负载均衡服务
     private final RebalanceService rebalanceService;
+    //yangyc 内部生产者实例，用于处理 消费端 消息回退
     private final DefaultMQProducer defaultMQProducer;
     private final ConsumerStatsManager consumerStatsManager;
+    //yangyc 心跳次数统计
     private final AtomicLong sendHeartbeatTimesTotal = new AtomicLong(0);
+    //yangyc RocketMQ 客户端状态
     private ServiceState serviceState = ServiceState.CREATE_JUST;
     private Random random = new Random();
 
@@ -129,7 +140,9 @@ public class MQClientInstance {
         this.nettyClientConfig = new NettyClientConfig();
         this.nettyClientConfig.setClientCallbackExecutorThreads(clientConfig.getClientCallbackExecutorThreads());
         this.nettyClientConfig.setUseTLS(clientConfig.isUseTLS());
+        //yangyc 创建客户端协议处理器, 用于处理 IO 事件
         this.clientRemotingProcessor = new ClientRemotingProcessor(this);
+        //yangyc 创建 API 实现对象。参数1：客户端网络配置,参数2：客户端协议处理器 要注册到客户端网络层,参数3：rpcHook 要注册到客户端网络层,参数4：客户端配置
         this.mQClientAPIImpl = new MQClientAPIImpl(this.nettyClientConfig, this.clientRemotingProcessor, rpcHook, clientConfig);
 
         if (this.clientConfig.getNamesrvAddr() != null) {
@@ -144,7 +157,7 @@ public class MQClientInstance {
         this.pullMessageService = new PullMessageService(this);
 
         this.rebalanceService = new RebalanceService(this);
-
+        //yangyc 创建一个 内部生产者对象实例，消息回退时使用
         this.defaultMQProducer = new DefaultMQProducer(MixAll.CLIENT_INNER_PRODUCER_GROUP);
         this.defaultMQProducer.resetClientConfig(clientConfig);
 
@@ -156,7 +169,7 @@ public class MQClientInstance {
             this.clientConfig,
             MQVersion.getVersionDesc(MQVersion.CURRENT_VERSION), RemotingCommand.getSerializeTypeConfigInThisServer());
     }
-
+    //yangyc 将topic的路由数据 转换为 主题发布数据
     public static TopicPublishInfo topicRouteData2TopicPublishInfo(final String topic, final TopicRouteData route) {
         TopicPublishInfo info = new TopicPublishInfo();
         info.setTopicRouteData(route);
@@ -221,28 +234,34 @@ public class MQClientInstance {
         return mqList;
     }
 
+    //yangyc-main 启动客户端实例。启动一系列服务：
+    // 1. 启用客户端网络层入口
+    // 2.启动定时任务入口
+    // 3.拉消息服务
+    // 4.负载均衡服务
+    // 5. 启动内部生产者对象，消息回退时使用。
     public void start() throws MQClientException {
 
         synchronized (this) {
             switch (this.serviceState) {
                 case CREATE_JUST:
-                    this.serviceState = ServiceState.START_FAILED;
+                    this.serviceState = ServiceState.START_FAILED; //yangyc 设置客户端实例状态为启动失败，后面启动成功会修改
                     // If not specified,looking address from name server
                     if (null == this.clientConfig.getNamesrvAddr()) {
                         this.mQClientAPIImpl.fetchNameServerAddr();
                     }
                     // Start request-response channel
-                    this.mQClientAPIImpl.start();
+                    this.mQClientAPIImpl.start(); // yangyc-main 启用客户端网络层入口
                     // Start various schedule tasks
-                    this.startScheduledTask();
+                    this.startScheduledTask();// yangyc-main 启动定时任务入口
                     // Start pull service
-                    this.pullMessageService.start();
+                    this.pullMessageService.start();// yangyc-main 拉消息服务
                     // Start rebalance service
-                    this.rebalanceService.start();
+                    this.rebalanceService.start();// yangyc-main 负载均衡服务
                     // Start push service
-                    this.defaultMQProducer.getDefaultMQProducerImpl().start(false);
+                    this.defaultMQProducer.getDefaultMQProducerImpl().start(false); //yangyc-main 启动内部生产者对象，消息回退时使用
                     log.info("the client factory [{}] start OK", this.clientId);
-                    this.serviceState = ServiceState.RUNNING;
+                    this.serviceState = ServiceState.RUNNING; //yangyc 设置客户端状态为运行中
                     break;
                 case START_FAILED:
                     throw new MQClientException("The Factory object[" + this.getClientId() + "] has been created before, and failed.", null);
@@ -252,7 +271,9 @@ public class MQClientInstance {
         }
     }
 
+    //yangyc-main 定时任务
     private void startScheduledTask() {
+        //yangyc-main 定时任务0： 定时获取 nameServer 的地址
         if (null == this.clientConfig.getNamesrvAddr()) {
             this.scheduledExecutorService.scheduleAtFixedRate(new Runnable() {
 
@@ -266,7 +287,7 @@ public class MQClientInstance {
                 }
             }, 1000 * 10, 1000 * 60 * 2, TimeUnit.MILLISECONDS);
         }
-
+        //yangyc-main 定时任务1：每30s, 从 nameserver 更新客户端本地的路由数据
         this.scheduledExecutorService.scheduleAtFixedRate(new Runnable() {
 
             @Override
@@ -278,20 +299,20 @@ public class MQClientInstance {
                 }
             }
         }, 10, this.clientConfig.getPollNameServerInterval(), TimeUnit.MILLISECONDS);
-
+        //yangyc-main 定时任务2：每30s, 两个事情：事1. 清理下线的 broker 数据。事2.向在线的 broker 发送心跳
         this.scheduledExecutorService.scheduleAtFixedRate(new Runnable() {
 
             @Override
             public void run() {
                 try {
-                    MQClientInstance.this.cleanOfflineBroker();
-                    MQClientInstance.this.sendHeartbeatToAllBrokerWithLock();
+                    MQClientInstance.this.cleanOfflineBroker(); //yangyc 事1. 清理下线的 broker 数据。检查客户端路由表，将客户端路由表不包含的 addr 清理掉。如果被清理的 brokerName 下所有的物理节点都没有了，则需要将 broker 映射数据清掉
+                    MQClientInstance.this.sendHeartbeatToAllBrokerWithLock(); //yangyc 事2. 向在线的 broker 发送心跳
                 } catch (Exception e) {
                     log.error("ScheduledTask sendHeartbeatToAllBroker exception", e);
                 }
             }
         }, 1000, this.clientConfig.getHeartbeatBrokerInterval(), TimeUnit.MILLISECONDS);
-
+        //yangyc-main 定时任务3：每5s, 消费者持久化消费进度
         this.scheduledExecutorService.scheduleAtFixedRate(new Runnable() {
 
             @Override
@@ -303,7 +324,7 @@ public class MQClientInstance {
                 }
             }
         }, 1000 * 10, this.clientConfig.getPersistConsumerOffsetInterval(), TimeUnit.MILLISECONDS);
-
+        //yangyc-main 定时任务4：每1min, 动态调整消费组线程池
         this.scheduledExecutorService.scheduleAtFixedRate(new Runnable() {
 
             @Override
@@ -322,9 +343,9 @@ public class MQClientInstance {
     }
 
     public void updateTopicRouteInfoFromNameServer() {
-        Set<String> topicList = new HashSet<String>();
+        Set<String> topicList = new HashSet<String>(); //yangyc 客户端关注的主题集合
 
-        // Consumer
+        // Consumer yangyc 提取消费者关注的主题
         {
             Iterator<Entry<String, MQConsumerInner>> it = this.consumerTable.entrySet().iterator();
             while (it.hasNext()) {
@@ -341,7 +362,7 @@ public class MQClientInstance {
             }
         }
 
-        // Producer
+        // Producer yangyc 提取生产者关注的主题
         {
             Iterator<Entry<String, MQProducerInner>> it = this.producerTable.entrySet().iterator();
             while (it.hasNext()) {
@@ -354,7 +375,7 @@ public class MQClientInstance {
             }
         }
 
-        for (String topic : topicList) {
+        for (String topic : topicList) { //yangyc 遍历客户端主题集合, 从 nameserver 拉起新的主题路由数据，与本地客户端的路由数据对比，判断是否需要更新
             this.updateTopicRouteInfoFromNameServer(topic);
         }
     }
@@ -380,9 +401,9 @@ public class MQClientInstance {
     }
 
     /**
-     * Remove offline broker
+     * Remove offline broker //yangyc 事1. 清理下线的 broker 数据。检查客户端路由表，将客户端路由表不包含的 addr 清理掉。如果被清理的 brokerName 下所有的物理节点都没有了，则需要将 broker 映射数据清掉
      */
-    private void cleanOfflineBroker() {
+    private void cleanOfflineBroker() { //yangyc 遍历 brokerAddrTable, 看 address 是否在 topicRouteTable 中。否则移除
         try {
             if (this.lockNamesrv.tryLock(LOCK_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
                 try {
@@ -504,7 +525,8 @@ public class MQClientInstance {
             }
         }
     }
-
+    //yangyc 入口：1.定时任务，2.发布消息
+    //yangyc 遍历客户端主题集合, 从 nameserver 拉起新的主题路由数据，与本地客户端的路由数据对比，判断是否需要更新. 参数1：主题，参数2：isDefault：false 参数3：null
     public boolean updateTopicRouteInfoFromNameServer(final String topic) {
         return updateTopicRouteInfoFromNameServer(topic, false, null);
     }
@@ -601,7 +623,8 @@ public class MQClientInstance {
             }
         }
     }
-
+    //yangyc 入口：1.定时任务，2.发布消息(正常情况 isDefault是false) 3. 发布消息（特殊情况 isDefault是true）
+    //yangyc 遍历客户端主题集合, 从 nameserver 拉起新的主题路由数据，与本地客户端的路由数据对比，判断是否需要更新
     public boolean updateTopicRouteInfoFromNameServer(final String topic, boolean isDefault,
         DefaultMQProducer defaultMQProducer) {
         try {
@@ -609,6 +632,7 @@ public class MQClientInstance {
                 try {
                     TopicRouteData topicRouteData;
                     if (isDefault && defaultMQProducer != null) {
+                        //yangyc 发布消息的特殊情况：获取TBW102 topic 的路由数据
                         topicRouteData = this.mQClientAPIImpl.getDefaultTopicRouteInfoFromNameServer(defaultMQProducer.getCreateTopicKey(),
                             1000 * 3);
                         if (topicRouteData != null) {
@@ -619,26 +643,29 @@ public class MQClientInstance {
                             }
                         }
                     } else {
+                        //yangyc 到 namesever 拉起最新的路由数据
                         topicRouteData = this.mQClientAPIImpl.getTopicRouteInfoFromNameServer(topic, 1000 * 3);
                     }
                     if (topicRouteData != null) {
+                        //yangyc 客户端本地的路由数据
                         TopicRouteData old = this.topicRouteTable.get(topic);
-                        boolean changed = topicRouteDataIsChange(old, topicRouteData);
+                        boolean changed = topicRouteDataIsChange(old, topicRouteData); //yangyc 判断 本地路由数据与nameserver最新下拉的路由数据 是否一致
                         if (!changed) {
                             changed = this.isNeedUpdateTopicRouteInfo(topic);
                         } else {
                             log.info("the topic[{}] route info changed, old[{}] ,new[{}]", topic, old, topicRouteData);
                         }
 
-                        if (changed) {
-                            TopicRouteData cloneTopicRouteData = topicRouteData.cloneTopicRouteData();
-
+                        if (changed) { //yangyc 条件成立：路由数据发生变化
+                            TopicRouteData cloneTopicRouteData = topicRouteData.cloneTopicRouteData(); //yangyc 克隆一份
+                            //yangyc 更新客户端 broker 物理节点映射表
                             for (BrokerData bd : topicRouteData.getBrokerDatas()) {
                                 this.brokerAddrTable.put(bd.getBrokerName(), bd.getBrokerAddrs());
                             }
 
-                            // Update Pub info
+                            // Update Pub info yangyc
                             {
+                                //yangyc 将topic的路由数据 转换为 主题发布数据
                                 TopicPublishInfo publishInfo = topicRouteData2TopicPublishInfo(topic, topicRouteData);
                                 publishInfo.setHaveTopicRouterInfo(true);
                                 Iterator<Entry<String, MQProducerInner>> it = this.producerTable.entrySet().iterator();
@@ -646,6 +673,7 @@ public class MQClientInstance {
                                     Entry<String, MQProducerInner> entry = it.next();
                                     MQProducerInner impl = entry.getValue();
                                     if (impl != null) {
+                                        //yangyc 生产者将主题发布数据保存到本地，方便发布消息时使用
                                         impl.updateTopicPublishInfo(topic, publishInfo);
                                     }
                                 }
@@ -968,11 +996,13 @@ public class MQClientInstance {
         this.rebalanceService.wakeup();
     }
 
+    //yangyc-main 调用客户端实例的负载均衡方法，客户端实例会遍历注册在客户端实例上的全部消费者，调用消费者的负载均衡方法
     public void doRebalance() {
         for (Map.Entry<String, MQConsumerInner> entry : this.consumerTable.entrySet()) {
             MQConsumerInner impl = entry.getValue();
             if (impl != null) {
                 try {
+                    //yangyc-main
                     impl.doRebalance();
                 } catch (Throwable e) {
                     log.error("doRebalance exception", e);
@@ -1019,6 +1049,7 @@ public class MQClientInstance {
         return null;
     }
 
+    //yangyc-main 获取指定 brokerName 的主机地址 master 节点 addr.(本地缓存中先找 Broker, 找不到就去 NameServer 拉)
     public String findBrokerAddressInPublish(final String brokerName) {
         HashMap<Long/* brokerId */, String/* address */> map = this.brokerAddrTable.get(brokerName);
         if (map != null && !map.isEmpty()) {
@@ -1027,7 +1058,7 @@ public class MQClientInstance {
 
         return null;
     }
-
+    //yangyc 查询指定 brokerName 的地址信息。参数1：brokerName; 参数2：可能0、也可能其他值； 参数3：false；
     public FindBrokerResult findBrokerAddressInSubscribe(
         final String brokerName,
         final long brokerId,
@@ -1036,10 +1067,10 @@ public class MQClientInstance {
         String brokerAddr = null;
         boolean slave = false;
         boolean found = false;
-
+        //yangyc 获取该 broker 的地址分布 map
         HashMap<Long/* brokerId */, String/* address */> map = this.brokerAddrTable.get(brokerName);
         if (map != null && !map.isEmpty()) {
-            brokerAddr = map.get(brokerId);
+            brokerAddr = map.get(brokerId); //yangyc 获取指定 brokerId 的 addr
             slave = brokerId != MixAll.MASTER_ID;
             found = brokerAddr != null;
 

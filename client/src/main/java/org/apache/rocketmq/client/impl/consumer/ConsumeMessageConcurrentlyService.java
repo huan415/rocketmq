@@ -49,17 +49,19 @@ import org.apache.rocketmq.common.utils.ThreadUtils;
 import org.apache.rocketmq.logging.InternalLogger;
 import org.apache.rocketmq.remoting.common.RemotingHelper;
 
+//yangyc-main 并发消费。消费过程的入口在 DefaultMQPushConsumerImpl 的 pullMessage 中定义的 PullCallback 中。
+// ConsumeMessageConcurrentlyService 和 ConsumeMessageOrderlyService 差别是会在消费前把队列锁起来，优先保证拉取同一个队列里的消息
 public class ConsumeMessageConcurrentlyService implements ConsumeMessageService {
     private static final InternalLogger log = ClientLogger.getLog();
-    private final DefaultMQPushConsumerImpl defaultMQPushConsumerImpl;
-    private final DefaultMQPushConsumer defaultMQPushConsumer;
-    private final MessageListenerConcurrently messageListener;
-    private final BlockingQueue<Runnable> consumeRequestQueue;
-    private final ThreadPoolExecutor consumeExecutor;
-    private final String consumerGroup;
+    private final DefaultMQPushConsumerImpl defaultMQPushConsumerImpl; //yangyc-main 消费者实现对象
+    private final DefaultMQPushConsumer defaultMQPushConsumer; //yangyc-main 消费者门面对象（config）
+    private final MessageListenerConcurrently messageListener; //yangyc-main 消费者监听器（消息处理的逻辑在此封装，该messageListener 由开发者实现，并注册到defaultMQPushConsumer）
+    private final BlockingQueue<Runnable> consumeRequestQueue; //yangyc-main 消费任务队列
+    private final ThreadPoolExecutor consumeExecutor; //yangyc-main 消费任务线程池
+    private final String consumerGroup; //yangyc 消费者组
 
-    private final ScheduledExecutorService scheduledExecutorService;
-    private final ScheduledExecutorService cleanExpireMsgExecutors;
+    private final ScheduledExecutorService scheduledExecutorService; //yangyc-main 调度线程池（用途：延迟提交消费任务）
+    private final ScheduledExecutorService cleanExpireMsgExecutors; //yangyc-main 运行“清理多钱任务”的调度线程池（该任务15min执行一次）
 
     public ConsumeMessageConcurrentlyService(DefaultMQPushConsumerImpl defaultMQPushConsumerImpl,
         MessageListenerConcurrently messageListener) {
@@ -71,8 +73,8 @@ public class ConsumeMessageConcurrentlyService implements ConsumeMessageService 
         this.consumeRequestQueue = new LinkedBlockingQueue<Runnable>();
 
         this.consumeExecutor = new ThreadPoolExecutor(
-            this.defaultMQPushConsumer.getConsumeThreadMin(),
-            this.defaultMQPushConsumer.getConsumeThreadMax(),
+            this.defaultMQPushConsumer.getConsumeThreadMin(), //yangyc 20
+            this.defaultMQPushConsumer.getConsumeThreadMax(), //yangyc 20
             1000 * 60,
             TimeUnit.MILLISECONDS,
             this.consumeRequestQueue,
@@ -82,7 +84,9 @@ public class ConsumeMessageConcurrentlyService implements ConsumeMessageService 
         this.cleanExpireMsgExecutors = Executors.newSingleThreadScheduledExecutor(new ThreadFactoryImpl("CleanExpireMsgScheduledThread_"));
     }
 
+    //yangyc-main 启动, 内部向 cleanExpireMsgExecutors 提交了清理过期消息的定时任务, 15min执行一次
     public void start() {
+        //yangyc 提交“清理过期消息”任务，延迟15min之后执行，之后每15min执行一次
         this.cleanExpireMsgExecutors.scheduleAtFixedRate(new Runnable() {
 
             @Override
@@ -198,21 +202,27 @@ public class ConsumeMessageConcurrentlyService implements ConsumeMessageService 
         return result;
     }
 
+    //yangyc-main 提交“消费任务”
+    // 参数1：从服务端拉取下来的消息，并且客户端过滤后剩余的消息；
+    // 参数2：客户端mq处理队列，注意：在提交消费任务之前，msgs 已经加入到该 pg 内；
+    // 参数3：mq；
+    // 参数4：并发消费服务--此参数无效
     @Override
     public void submitConsumeRequest(
         final List<MessageExt> msgs,
         final ProcessQueue processQueue,
         final MessageQueue messageQueue,
         final boolean dispatchToConsume) {
+        //yangyc 此参数控制一个消费任务 可消费的消息数量（默认：1）
         final int consumeBatchSize = this.defaultMQPushConsumer.getConsumeMessageBatchMaxSize();
-        if (msgs.size() <= consumeBatchSize) {
+        if (msgs.size() <= consumeBatchSize) { //yangyc-main CASE1: 检查 msgs 内的消息数 <= consumeBatchSize, 那直接封装一个“消费任务”(ConsumeRequest)提交到消费线程池(ConsumeExecutor)即可
             ConsumeRequest consumeRequest = new ConsumeRequest(msgs, processQueue, messageQueue);
             try {
                 this.consumeExecutor.submit(consumeRequest);
             } catch (RejectedExecutionException e) {
                 this.submitConsumeRequestLater(consumeRequest);
             }
-        } else {
+        } else { //yangyc-main CASE1: 检查 msgs 内的消息数 > consumeBatchSize, 这里逻辑：按照 consumeBatchSize 规则，将 msgs 拆分成多个“消费任务” 提交到消费线程池(ConsumeExecutor)
             for (int total = 0; total < msgs.size(); ) {
                 List<MessageExt> msgThis = new ArrayList<MessageExt>(consumeBatchSize);
                 for (int i = 0; i < consumeBatchSize; i++, total++) {
@@ -239,15 +249,22 @@ public class ConsumeMessageConcurrentlyService implements ConsumeMessageService 
 
 
     private void cleanExpireMsg() {
+        //yangyc processQueueTable 存储的是分配给当前消费者的队列（mq、pq）
         Iterator<Map.Entry<MessageQueue, ProcessQueue>> it =
             this.defaultMQPushConsumerImpl.getRebalanceImpl().getProcessQueueTable().entrySet().iterator();
         while (it.hasNext()) {
             Map.Entry<MessageQueue, ProcessQueue> next = it.next();
+            //yangyc 获取该 messageQueue 在消费者本地的 processQueue
             ProcessQueue pq = next.getValue();
+            //yangyc 调用 pq 清理过期消息的方法
             pq.cleanExpiredMsg(this.defaultMQPushConsumer);
         }
     }
-
+    //yangyc-main 处理消费结果。有说明事情需要处理？
+    // 1.消费成功的话，需要将 msgs 从 pq 移除
+    // 2.消费失败的话，需要将消费失败的消息回退到服务器，并且将回退失败的消息（会将回退失败的消息从当前任务移除）再次提交消费任务，最后也会将 CR.msgs 从 pq 移除
+    // 3.更新消费进度
+    // 参数1：消费结果任务；参数2：消费上下文；参数3：当前消费任务；
     public void processConsumeResult(
         final ConsumeConcurrentlyStatus status,
         final ConsumeConcurrentlyContext context,
@@ -259,8 +276,9 @@ public class ConsumeMessageConcurrentlyService implements ConsumeMessageService 
             return;
 
         switch (status) {
-            case CONSUME_SUCCESS:
+            case CONSUME_SUCCESS://yangyc-main CASE1: 消费成功
                 if (ackIndex >= consumeRequest.getMsgs().size()) {
+                    //yangyc 消费成功的话，ackIndex 设置成 消费数量-1 举个例子：假设 msgs 内有 10 条消息，那么 ackIndex = 9
                     ackIndex = consumeRequest.getMsgs().size() - 1;
                 }
                 int ok = ackIndex + 1;
@@ -268,7 +286,7 @@ public class ConsumeMessageConcurrentlyService implements ConsumeMessageService 
                 this.getConsumerStatsManager().incConsumeOKTPS(consumerGroup, consumeRequest.getMessageQueue().getTopic(), ok);
                 this.getConsumerStatsManager().incConsumeFailedTPS(consumerGroup, consumeRequest.getMessageQueue().getTopic(), failed);
                 break;
-            case RECONSUME_LATER:
+            case RECONSUME_LATER://yangyc-main CASE2:  消费失败
                 ackIndex = -1;
                 this.getConsumerStatsManager().incConsumeFailedTPS(consumerGroup, consumeRequest.getMessageQueue().getTopic(),
                     consumeRequest.getMsgs().size());
@@ -286,27 +304,38 @@ public class ConsumeMessageConcurrentlyService implements ConsumeMessageService 
                 break;
             case CLUSTERING:
                 List<MessageExt> msgBackFailed = new ArrayList<MessageExt>(consumeRequest.getMsgs().size());
+                //yangyc-main 从 ackIndex+1 开始的位置, 遍历 msgs, 下面逻辑是每条消息的处理
+                //yangyc 当消费失败是，该消息任务内的全部消息都会尝试回退给服务器（因为消费失败时，ackIndex 被设置成了-1）
                 for (int i = ackIndex + 1; i < consumeRequest.getMsgs().size(); i++) {
                     MessageExt msg = consumeRequest.getMsgs().get(i);
+                    //yangyc-main 消息进行回调, 调用 defaultMQPushConsumerImpl.sendMessageBack()
                     boolean result = this.sendMessageBack(msg, context);
-                    if (!result) {
+                    if (!result) {//yangyc 回退失败的情况
+                        //yangyc 消息重试属性++
                         msg.setReconsumeTimes(msg.getReconsumeTimes() + 1);
+                        //yangyc 加入回退失败集合
                         msgBackFailed.add(msg);
                     }
                 }
 
                 if (!msgBackFailed.isEmpty()) {
+                    //yangyc-main 将回退失败的消息从当前消费任务的 msgs 集合内移除
                     consumeRequest.getMsgs().removeAll(msgBackFailed);
-
+                    //yangyc-main 对于回退失败的消息，再次提交消费任务，延迟5s后再次尝试消费
                     this.submitConsumeRequestLater(msgBackFailed, consumeRequest.getProcessQueue(), consumeRequest.getMessageQueue());
                 }
                 break;
             default:
                 break;
         }
-
+        //yangyc-main processQueue 移除本 ”消息任务“ 的消息, 并返回下一次消费的 offset
+        //yangyc 从 pg 中删除已经消费成功的消息，返回 offset
+        //yangyc offset(表示pq本地的消费者进度；
+        // offset 情况1：-1：说明pq内无数据; 情况2：queueOffsetMax+1(删完这里msgs之后无消息了)；情况3：删除完该批msgs之后，pg内还有剩余待消费的消息，此时返回firstMsgOffset )
         long offset = consumeRequest.getProcessQueue().removeMessage(consumeRequest.getMsgs());
         if (offset >= 0 && !consumeRequest.getProcessQueue().isDropped()) {
+            //yangyc-main 更新消费者本地的该 mq 的消费进度。使用 CAS+Compare 的方式更新 storeOffset 本地缓存中该 mq 的进度
+            // 参数1：mq；参数2：offset(更新值)；参数3：true  表示：新值>旧值才去更新（消费进度不能逆增长）；
             this.defaultMQPushConsumerImpl.getOffsetStore().updateOffset(consumeRequest.getMessageQueue(), offset, true);
         }
     }
@@ -315,12 +344,14 @@ public class ConsumeMessageConcurrentlyService implements ConsumeMessageService 
         return this.defaultMQPushConsumerImpl.getConsumerStatsManager();
     }
 
+    //yangyc-main 消息进行回调
     public boolean sendMessageBack(final MessageExt msg, final ConsumeConcurrentlyContext context) {
         int delayLevel = context.getDelayLevelWhenNextConsume();
 
         // Wrap topic with namespace before sending back message.
         msg.setTopic(this.defaultMQPushConsumer.withNamespace(msg.getTopic()));
         try {
+            //yangyc-main 消息进行回调
             this.defaultMQPushConsumerImpl.sendMessageBack(msg, delayLevel, context.getMessageQueue().getBrokerName());
             return true;
         } catch (Exception e) {
@@ -358,9 +389,9 @@ public class ConsumeMessageConcurrentlyService implements ConsumeMessageService 
     }
 
     class ConsumeRequest implements Runnable {
-        private final List<MessageExt> msgs;
-        private final ProcessQueue processQueue;
-        private final MessageQueue messageQueue;
+        private final List<MessageExt> msgs; //yangyc-main 分配到该消费任务的消息
+        private final ProcessQueue processQueue; //yangyc-main 消息处理队列
+        private final MessageQueue messageQueue; //yangyc-main 消息队列
 
         public ConsumeRequest(List<MessageExt> msgs, ProcessQueue processQueue, MessageQueue messageQueue) {
             this.msgs = msgs;
@@ -376,16 +407,20 @@ public class ConsumeMessageConcurrentlyService implements ConsumeMessageService 
             return processQueue;
         }
 
+        //yangyc-main 消息任务执行入口
         @Override
         public void run() {
-            if (this.processQueue.isDropped()) {
+            if (this.processQueue.isDropped()) { //yangyc 条件成立：说明该 queue 经过 rbl 分配到其他 consumer, 当前 consumer 不需要再去消费该 queue 的消息了，直接返回
                 log.info("the message queue not be able to consume, because it's dropped. group={} {}", ConsumeMessageConcurrentlyService.this.consumerGroup, this.messageQueue);
                 return;
             }
-
+            //yangyc-main 获取 messageLintener (开发者创建的“消息监听器”，消息处理的业务逻辑都在此封装)
             MessageListenerConcurrently listener = ConsumeMessageConcurrentlyService.this.messageListener;
+            //yangyc-main 消费上下文对象
             ConsumeConcurrentlyContext context = new ConsumeConcurrentlyContext(messageQueue);
+            //yangyc 消费状态（CONSUME_SUCCESS、RECONSUME_LATER）
             ConsumeConcurrentlyStatus status = null;
+            //yangyc 参数1：待消费的消息；参数2：消费者组
             defaultMQPushConsumerImpl.resetRetryAndNamespace(msgs, defaultMQPushConsumer.getConsumerGroup());
 
             ConsumeMessageContext consumeMessageContext = null;
@@ -397,18 +432,24 @@ public class ConsumeMessageConcurrentlyService implements ConsumeMessageService 
                 consumeMessageContext.setMq(messageQueue);
                 consumeMessageContext.setMsgList(msgs);
                 consumeMessageContext.setSuccess(false);
+                //yangyc-main 执行消费扩展接口 ”consumeMessageHookList“ before 系列方法
                 ConsumeMessageConcurrentlyService.this.defaultMQPushConsumerImpl.executeHookBefore(consumeMessageContext);
             }
-
+            //yangyc 消费开始时间
             long beginTimestamp = System.currentTimeMillis();
+            //yangyc 消费过程中，listener 是否向外抛出异常
             boolean hasException = false;
             ConsumeReturnType returnType = ConsumeReturnType.SUCCESS;
             try {
                 if (msgs != null && !msgs.isEmpty()) {
                     for (MessageExt msg : msgs) {
+                        //yangyc 给每条消息设置消费开始时间（清理过期消息的任务，会检查该属性。。。判断是否消费超时。。。）
                         MessageAccessor.setConsumeStartTimeStamp(msg, String.valueOf(System.currentTimeMillis()));
                     }
                 }
+                //yangyc-main 执行用户提供的 messageListener; 返回 ConsumeConcurrentlyStatus（CONSUME_SUCCESS、RECONSUME_LATER、null）
+                //yangyc 参数1：创建的list内容还是msgs这些消息，但是该list不能被添加或者删除数据；参数2：消费上下文（主要是控制消费消费失败时，消息的延迟级别）
+                // 返回值：ConsumeConcurrentlyStatus（CONSUME_SUCCESS、RECONSUME_LATER、null）；
                 status = listener.consumeMessage(Collections.unmodifiableList(msgs), context);
             } catch (Throwable e) {
                 log.warn("consumeMessage exception: {} Group: {} Msgs: {} MQ: {}",
@@ -448,6 +489,7 @@ public class ConsumeMessageConcurrentlyService implements ConsumeMessageService 
             if (ConsumeMessageConcurrentlyService.this.defaultMQPushConsumerImpl.hasHook()) {
                 consumeMessageContext.setStatus(status.toString());
                 consumeMessageContext.setSuccess(ConsumeConcurrentlyStatus.CONSUME_SUCCESS == status);
+                //yangyc-main 执行消费扩展接口 ”consumeMessageHookList“ after 系列方法
                 ConsumeMessageConcurrentlyService.this.defaultMQPushConsumerImpl.executeHookAfter(consumeMessageContext);
             }
 
@@ -455,8 +497,13 @@ public class ConsumeMessageConcurrentlyService implements ConsumeMessageService 
                 .incConsumeRT(ConsumeMessageConcurrentlyService.this.consumerGroup, messageQueue.getTopic(), consumeRT);
 
             if (!processQueue.isDropped()) {
+                //yangyc-main 正常走这里，处理消费结果。有说明事情需要处理？
+                // 1.消费成功的话，需要将 msgs 从 pq 移除
+                // 2.消费失败的话，需要将消费失败的消息回退到服务器，并且将回退失败的消息（会将回退失败的消息从当前任务移除）再次提交消费任务，最后也会将 CR.msgs 从 pq 移除
+                // 3.更新消费进度
+                // 参数1：消费结果任务；参数2：消费上下文；参数3：当前消费任务；
                 ConsumeMessageConcurrentlyService.this.processConsumeResult(status, context, this);
-            } else {
+            } else { //yangyc 执行到这里：说明 messageListener 运行过程中，该 mq 分配到其他 consumer 或者 当前消费者退出
                 log.warn("processQueue is dropped without process consume result. messageQueue={}, msgs={}", messageQueue, msgs);
             }
         }

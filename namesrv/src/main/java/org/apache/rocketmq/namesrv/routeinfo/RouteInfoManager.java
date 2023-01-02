@@ -99,6 +99,8 @@ public class RouteInfoManager {
         return topicList.encode();
     }
 
+    //yangyc-main 注册 broker
+    // 参数1:集群, 参数2:节点ip地址, 参数3:brokerName, 参数4:brokerId,注意0的brokerId的节点为主节点, 参数5:ha节点ip地址, 参数6:当前节点的主题信息, 参数7:过滤服务器列表, 参数8:当前服务器和客户端的通信channel
     public RegisterBrokerResult registerBroker(
         final String clusterName,
         final String brokerAddr,
@@ -108,54 +110,54 @@ public class RouteInfoManager {
         final TopicConfigSerializeWrapper topicConfigWrapper,
         final List<String> filterServerList,
         final Channel channel) {
-        RegisterBrokerResult result = new RegisterBrokerResult();
+        RegisterBrokerResult result = new RegisterBrokerResult(); //yangyc 返回结果的封装对象
         try {
             try {
-                this.lock.writeLock().lockInterruptibly();
+                this.lock.writeLock().lockInterruptibly(); //yangyc 写锁
 
-                Set<String> brokerNames = this.clusterAddrTable.get(clusterName);
+                Set<String> brokerNames = this.clusterAddrTable.get(clusterName); //yangyc 获取当前集群上的broker 列表
                 if (null == brokerNames) {
                     brokerNames = new HashSet<String>();
-                    this.clusterAddrTable.put(clusterName, brokerNames);
+                    this.clusterAddrTable.put(clusterName, brokerNames); //yangyc 添加新集群的映射数据。key:集群名称，value:集群结合 set
                 }
-                brokerNames.add(brokerName);
+                brokerNames.add(brokerName); //yangyc 将当前 broker 加入集群 set
 
-                boolean registerFirst = false;
+                boolean registerFirst = false; //yangyc 是否为第一次注册
 
-                BrokerData brokerData = this.brokerAddrTable.get(brokerName);
-                if (null == brokerData) {
+                BrokerData brokerData = this.brokerAddrTable.get(brokerName); //yangyc 获取 brokerData
+                if (null == brokerData) { //yangyc 条件成立，说明是第一次注册
                     registerFirst = true;
-                    brokerData = new BrokerData(clusterName, brokerName, new HashMap<Long, String>());
-                    this.brokerAddrTable.put(brokerName, brokerData);
+                    brokerData = new BrokerData(clusterName, brokerName, new HashMap<Long, String>()); //yangyc 创建 brokerData
+                    this.brokerAddrTable.put(brokerName, brokerData); //yangyc 将 broker 映射数据加入 broker 映射表
                 }
-                Map<Long, String> brokerAddrsMap = brokerData.getBrokerAddrs();
+                Map<Long, String> brokerAddrsMap = brokerData.getBrokerAddrs(); //yangyc 获取 broker 物理节点 map 表
                 //Switch slave to master: first remove <1, IP:PORT> in namesrv, then add <0, IP:PORT>
                 //The same IP:PORT must only have one record in brokerAddrTable
                 Iterator<Entry<Long, String>> it = brokerAddrsMap.entrySet().iterator();
                 while (it.hasNext()) {
                     Entry<Long, String> item = it.next();
                     if (null != brokerAddr && brokerAddr.equals(item.getValue()) && brokerId != item.getKey()) {
-                        it.remove();
+                        it.remove(); //yangyc 条件成立：物理节点角色发生变化了, 这个时候需要将它从 broker 物理节点 map 中移除
                     }
                 }
 
-                String oldAddr = brokerData.getBrokerAddrs().put(brokerId, brokerAddr);
+                String oldAddr = brokerData.getBrokerAddrs().put(brokerId, brokerAddr); //yangyc 重写
                 registerFirst = registerFirst || (null == oldAddr);
 
                 if (null != topicConfigWrapper
-                    && MixAll.MASTER_ID == brokerId) {
+                    && MixAll.MASTER_ID == brokerId) { //yangyc 条件成立：broker 上的主题不为 null, 并且当前物理节点是 broker 的 master 节点
                     if (this.isBrokerTopicConfigChanged(brokerAddr, topicConfigWrapper.getDataVersion())
                         || registerFirst) {
                         ConcurrentMap<String, TopicConfig> tcTable =
-                            topicConfigWrapper.getTopicConfigTable();
+                            topicConfigWrapper.getTopicConfigTable(); //yangyc 获取当前 broker 信息中主题映射表。从 broekr 注册数据获取
                         if (tcTable != null) {
                             for (Map.Entry<String, TopicConfig> entry : tcTable.entrySet()) {
-                                this.createAndUpdateQueueData(brokerName, entry.getValue());
+                                this.createAndUpdateQueueData(brokerName, entry.getValue()); //yangyc-main 加入或更新到 nameserver 内
                             }
                         }
                     }
                 }
-
+                //yangyc 添加当前节点的 BrokerLiveInfo, 定时任务会扫描这个映射表。prevBrokerLiveInfo 是上一次心跳时,broker 节点的存活对象数据
                 BrokerLiveInfo prevBrokerLiveInfo = this.brokerLiveTable.put(brokerAddr,
                     new BrokerLiveInfo(
                         System.currentTimeMillis(),
@@ -174,24 +176,24 @@ public class RouteInfoManager {
                     }
                 }
 
-                if (MixAll.MASTER_ID != brokerId) {
-                    String masterAddr = brokerData.getBrokerAddrs().get(MixAll.MASTER_ID);
+                if (MixAll.MASTER_ID != brokerId) { //yangyc 条件成立：说明当前 BrokerId ！=0; 不是 master 节点
+                    String masterAddr = brokerData.getBrokerAddrs().get(MixAll.MASTER_ID); //yangyc 获取 broker 主节点的物理地址
                     if (masterAddr != null) {
-                        BrokerLiveInfo brokerLiveInfo = this.brokerLiveTable.get(masterAddr);
+                        BrokerLiveInfo brokerLiveInfo = this.brokerLiveTable.get(masterAddr); //yangyc 获取master节点
                         if (brokerLiveInfo != null) {
-                            result.setHaServerAddr(brokerLiveInfo.getHaServerAddr());
+                            result.setHaServerAddr(brokerLiveInfo.getHaServerAddr()); //yangyc result 中设置 master 节点的信息
                             result.setMasterAddr(masterAddr);
                         }
                     }
                 }
             } finally {
-                this.lock.writeLock().unlock();
+                this.lock.writeLock().unlock(); //yangyc 释放写锁
             }
         } catch (Exception e) {
             log.error("registerBroker Exception", e);
         }
 
-        return result;
+        return result; //yangyc 返回结果
     }
 
     public boolean isBrokerTopicConfigChanged(final String brokerAddr, final DataVersion dataVersion) {
@@ -426,6 +428,7 @@ public class RouteInfoManager {
         return null;
     }
 
+    //yangyc-main 每 10s 检查 broker 存活状态, 将状态为 idle 的 broker 移除
     public void scanNotActiveBroker() {
         Iterator<Entry<String, BrokerLiveInfo>> it = this.brokerLiveTable.entrySet().iterator();
         while (it.hasNext()) {

@@ -34,19 +34,19 @@ public class MappedFileQueue {
     private static final InternalLogger LOG_ERROR = InternalLoggerFactory.getLogger(LoggerName.STORE_ERROR_LOGGER_NAME);
 
     private static final int DELETE_FILES_BATCH_MAX = 10;
-
+    //yangyc mfq 管理的目录（CommitLog: ../store/commitlog  或者 consumeQueue:../store/xxx_topic/0）
     private final String storePath;
-
+    //yangyc 目录下每个文件大小（commitLog: 默认1g  或者   consumeQueue: 600w 字节）
     private final int mappedFileSize;
-
+    //yangyc 目录下每个 mappedFile 集合
     private final CopyOnWriteArrayList<MappedFile> mappedFiles = new CopyOnWriteArrayList<MappedFile>();
-
+    //yangyc 创建 mappedFile 的服务。 向它提交 request，会创建并返回一个 mappedFile 对象
     private final AllocateMappedFileService allocateMappedFileService;
 
-    private long flushedWhere = 0;
+    private long flushedWhere = 0; //yangyc 目录下的刷盘位点（值：curMappedFile.fileName + curMappedFile.wrotePosition）
     private long committedWhere = 0;
 
-    private volatile long storeTimestamp = 0;
+    private volatile long storeTimestamp = 0; //yangyc 当前目录下最后一条 msg 的存储时间
 
     public MappedFileQueue(final String storePath, int mappedFileSize,
         AllocateMappedFileService allocateMappedFileService) {
@@ -121,6 +121,40 @@ public class MappedFileQueue {
         this.deleteExpiredFile(willRemoveFiles);
     }
 
+    public boolean load() {
+        File dir = new File(this.storePath); //yangyc 创建目录对象
+        File[] files = dir.listFiles(); //yangyc 获取目录下所有的文件
+        if (files != null) {
+            // ascending order
+            Arrays.sort(files); //yangyc 按照文件名排序
+            for (File file : files) {
+
+                if (file.length() != this.mappedFileSize) {
+                    log.warn(file + "\t" + file.length()
+                        + " length not matched message store config value, please check it manually");
+                    return false;
+                }
+
+                try {
+                    //yangyc 为当前的 file 创建对应的 mappedFile 对象
+                    MappedFile mappedFile = new MappedFile(file.getPath(), mappedFileSize);
+                    //yangyc 设置 wrotePosition、flushedPosition、commitedPosition 值为 mappedFileSize, 并不是准确值，准确值在 recover 阶段设置
+                    mappedFile.setWrotePosition(this.mappedFileSize);
+                    mappedFile.setFlushedPosition(this.mappedFileSize);
+                    mappedFile.setCommittedPosition(this.mappedFileSize);
+                    //yangyc 将当前 file 的 mappedFile 对象加入到 list 集合管理
+                    this.mappedFiles.add(mappedFile);
+                    log.info("load " + file.getPath() + " OK");
+                } catch (IOException e) {
+                    log.error("load file " + file + " error", e);
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
     void deleteExpiredFile(List<MappedFile> files) {
 
         if (!files.isEmpty()) {
@@ -144,38 +178,6 @@ public class MappedFileQueue {
         }
     }
 
-    public boolean load() {
-        File dir = new File(this.storePath);
-        File[] files = dir.listFiles();
-        if (files != null) {
-            // ascending order
-            Arrays.sort(files);
-            for (File file : files) {
-
-                if (file.length() != this.mappedFileSize) {
-                    log.warn(file + "\t" + file.length()
-                        + " length not matched message store config value, please check it manually");
-                    return false;
-                }
-
-                try {
-                    MappedFile mappedFile = new MappedFile(file.getPath(), mappedFileSize);
-
-                    mappedFile.setWrotePosition(this.mappedFileSize);
-                    mappedFile.setFlushedPosition(this.mappedFileSize);
-                    mappedFile.setCommittedPosition(this.mappedFileSize);
-                    this.mappedFiles.add(mappedFile);
-                    log.info("load " + file.getPath() + " OK");
-                } catch (IOException e) {
-                    log.error("load file " + file + " error", e);
-                    return false;
-                }
-            }
-        }
-
-        return true;
-    }
-
     public long howMuchFallBehind() {
         if (this.mappedFiles.isEmpty())
             return 0;
@@ -190,26 +192,31 @@ public class MappedFileQueue {
 
         return 0;
     }
-
+    //yangyc 参数1：startOffset 文件起始偏移量。  参数2：当文件不存在时, 是否需要创建 mappedFile
     public MappedFile getLastMappedFile(final long startOffset, boolean needCreate) {
+        //yangyc 该值控制是否创建 mappedFile, 当需要创建 mappedFile时，它充当创建文件名的结尾
+        //yangyc 两种情况会创建：情况1.list 内没有 mappedFile    情况2.list 最后一个 mappedFile（当前顺序写的mappedFile）已经写满了
         long createOffset = -1;
+        //yangyc-main 获取当前正则顺序写的 MappedFile
         MappedFile mappedFileLast = getLastMappedFile();
 
-        if (mappedFileLast == null) {
-            createOffset = startOffset - (startOffset % this.mappedFileSize);
+        if (mappedFileLast == null) { //yangyc 情况1.list 内没有 mappedFile
+            createOffset = startOffset - (startOffset % this.mappedFileSize); //yangyc createOffset 的取值必须是 mappedFileSize 的倍数或者 0
         }
 
-        if (mappedFileLast != null && mappedFileLast.isFull()) {
-            createOffset = mappedFileLast.getFileFromOffset() + this.mappedFileSize;
+        if (mappedFileLast != null && mappedFileLast.isFull()) { //yangyc 情况2.list 最后一个 mappedFile（当前顺序写的mappedFile）已经写满了
+            createOffset = mappedFileLast.getFileFromOffset() + this.mappedFileSize; //yangyc 上一个文件名转long + mappedFileSize
         }
 
-        if (createOffset != -1 && needCreate) {
-            String nextFilePath = this.storePath + File.separator + UtilAll.offset2FileName(createOffset);
+        if (createOffset != -1 && needCreate) { //yangyc 条件成立：需要创建新的 mappedFile
+            String nextFilePath = this.storePath + File.separator + UtilAll.offset2FileName(createOffset); //yangyc 获取待创建文件的绝对路径（下次即将创建的文件名）
             String nextNextFilePath = this.storePath + File.separator
-                + UtilAll.offset2FileName(createOffset + this.mappedFileSize);
+                + UtilAll.offset2FileName(createOffset + this.mappedFileSize); //yangyc 获取下下次要创建文件的绝对路径
             MappedFile mappedFile = null;
 
             if (this.allocateMappedFileService != null) {
+                //yangyc-main 创建 mappedFile 的服务。 向它提交 request，会创建并返回一个 mappedFile 对象
+                //yangyc 当 mappedFileSize >= 1g 的时候，这里创建 mappedFile 之后会执行预热方法
                 mappedFile = this.allocateMappedFileService.putRequestAndReturnMappedFile(nextFilePath,
                     nextNextFilePath, this.mappedFileSize);
             } else {
@@ -284,7 +291,7 @@ public class MappedFileQueue {
         }
         return true;
     }
-
+    //yangyc-main 获取 MappedFileQueue 管理的最小物理偏移量，其实就是 list(0) 这个文件名称表示的偏移量
     public long getMinOffset() {
 
         if (!this.mappedFiles.isEmpty()) {
@@ -299,9 +306,11 @@ public class MappedFileQueue {
         return -1;
     }
 
+    //yangyc-main 获取 MappedFileQueue 管理的最大物理偏移量，其实就是 当前顺序写的 MappedFile 文件名 + MappedFile.wrotePosition
     public long getMaxOffset() {
         MappedFile mappedFile = getLastMappedFile();
         if (mappedFile != null) {
+            //yangyc 文件名 + 文件正在顺序写的数据位点 => maxOffset
             return mappedFile.getFileFromOffset() + mappedFile.getReadPosition();
         }
         return 0;
@@ -332,24 +341,26 @@ public class MappedFileQueue {
 
         }
     }
-
+    //yangyc-main commitedLog 目录删除过期文件，根据文件”保留时长“删除过期文件
+    //yangyc 参数1:过期时间, 参数2:删除两个文件之间的时间间隔, 参数3:mappedFile.destroy的参数, 参数4:是否强制删除（不考虑expiredTime这个条件）
     public int deleteExpiredFileByTime(final long expiredTime,
         final int deleteFilesInterval,
         final long intervalForcibly,
         final boolean cleanImmediately) {
-        Object[] mfs = this.copyMappedFiles(0);
+        Object[] mfs = this.copyMappedFiles(0); //yangyc 获取 mfs 数组
 
         if (null == mfs)
             return 0;
 
         int mfsLength = mfs.length - 1;
-        int deleteCount = 0;
-        List<MappedFile> files = new ArrayList<MappedFile>();
+        int deleteCount = 0; //yangyc 删除的文件数
+        List<MappedFile> files = new ArrayList<MappedFile>(); //yangyc 被删除的问价列表
         if (null != mfs) {
             for (int i = 0; i < mfsLength; i++) {
                 MappedFile mappedFile = (MappedFile) mfs[i];
-                long liveMaxTimestamp = mappedFile.getLastModifiedTimestamp() + expiredTime;
-                if (System.currentTimeMillis() >= liveMaxTimestamp || cleanImmediately) {
+                long liveMaxTimestamp = mappedFile.getLastModifiedTimestamp() + expiredTime; //yangyc 计算出当前文件存活时间的截止点
+                if (System.currentTimeMillis() >= liveMaxTimestamp || cleanImmediately) { //yangyc 条件成立：1. 文件存活时间达到上线 或者 2：disk 占用率达到上线会走强制删除
+                    //yangyc-main 删除 mappedFile
                     if (mappedFile.destroy(intervalForcibly)) {
                         files.add(mappedFile);
                         deleteCount++;
@@ -374,28 +385,31 @@ public class MappedFileQueue {
             }
         }
 
-        deleteExpiredFile(files);
+        deleteExpiredFile(files); //yangyc 将删除文件的 mf 从 queue 内删除
 
-        return deleteCount;
+        return deleteCount;  //yangyc 返回删除的文件数
     }
-
+    //yangyc-main consumerQueue 目录删除过期文件。参数1：commitLog目录下的最小物理偏移量（第一条消息 offset）；参数2：consumeQueue 文件内每个数据单元固定大小；
     public int deleteExpiredFileByOffset(long offset, int unitSize) {
         Object[] mfs = this.copyMappedFiles(0);
 
         List<MappedFile> files = new ArrayList<MappedFile>();
         int deleteCount = 0;
         if (null != mfs) {
-
+            //yangyc 这里减一，是保证当前正在顺序写的 mf 不被删除
             int mfsLength = mfs.length - 1;
-
+            //yangyc-main 遍历每个 mappedFile, 读取最后一条数据，提取出 CQData->msgPhyOffset 值，如果这个值小于 offset，则删除该 mappedFile 文件
             for (int i = 0; i < mfsLength; i++) {
-                boolean destroy;
+                boolean destroy; //yangyc 当前 mf 是否删除
                 MappedFile mappedFile = (MappedFile) mfs[i];
+                //yangyc 获取当前文件最后一个数据单元
                 SelectMappedBufferResult result = mappedFile.selectMappedBuffer(this.mappedFileSize - unitSize);
                 if (result != null) {
+                    //yangyc 获取 cqData.msgPhyOffset
                     long maxOffsetInLogicQueue = result.getByteBuffer().getLong();
+                    //yangyc 最终调用 mappedFile.release()
                     result.release();
-                    destroy = maxOffsetInLogicQueue < offset;
+                    destroy = maxOffsetInLogicQueue < offset;//yangyc true：说明当前 mf 内的全部的 cqData 都是过期数据
                     if (destroy) {
                         log.info("physic min offset " + offset + ", logics in current mappedFile max offset "
                             + maxOffsetInLogicQueue + ", delete it");
@@ -417,21 +431,23 @@ public class MappedFileQueue {
             }
         }
 
-        deleteExpiredFile(files);
+        deleteExpiredFile(files); //yangyc 将删除文件的 mf 从 queue 内删除
 
-        return deleteCount;
+        return deleteCount; //yangyc 返回删除的文件数
     }
-
+    //yangyc-main 根据 flushedWhere 查找合适的 MappedFile 对象，并调用该 MappedFile 的落盘方法，并更新全局 flushedWhere 值
+    //yangyc 返回值：true:表示本次刷盘无数据落盘；false:表示本次刷盘有数据落盘。 参数：flushLeastPages (0：表示强制刷新； >0: 脏页数据必须达到flushLeastPages才刷新)
     public boolean flush(final int flushLeastPages) {
         boolean result = true;
+        //yangyc-main 获取当前正在刷盘的文件（正在顺序写的 mappedFile）
         MappedFile mappedFile = this.findMappedFileByOffset(this.flushedWhere, this.flushedWhere == 0);
         if (mappedFile != null) {
-            long tmpTimeStamp = mappedFile.getStoreTimestamp();
-            int offset = mappedFile.flush(flushLeastPages);
-            long where = mappedFile.getFileFromOffset() + offset;
-            result = where == this.flushedWhere;
-            this.flushedWhere = where;
-            if (0 == flushLeastPages) {
+            long tmpTimeStamp = mappedFile.getStoreTimestamp();//yangyc 获取mappedFile最后一条消息的存储时间
+            int offset = mappedFile.flush(flushLeastPages);//yangyc-main 调用 mappedFile 去刷盘。返回最新的落盘位点。
+            long where = mappedFile.getFileFromOffset() + offset; //yangyc 起始偏移量 + 最新落盘位点
+            result = where == this.flushedWhere; //yangyc true:表示本次刷盘无数据落盘；false:表示本次刷盘有数据落盘
+            this.flushedWhere = where; //yangyc 将最新的目录刷盘位点赋值给 flushedWhere
+            if (0 == flushLeastPages) { //yangyc 强制刷盘
                 this.storeTimestamp = tmpTimeStamp;
             }
         }
@@ -459,19 +475,23 @@ public class MappedFileQueue {
      * @param returnFirstOnNotFound If the mapped file is not found, then return the first one.
      * @return Mapped file or null (when not found and returnFirstOnNotFound is <code>false</code>).
      */
+    //yangyc-main 根据 offset 查找偏移量区间包含该 offset 的 mappedFile
     public MappedFile findMappedFileByOffset(final long offset, final boolean returnFirstOnNotFound) {
         try {
-            MappedFile firstMappedFile = this.getFirstMappedFile();
-            MappedFile lastMappedFile = this.getLastMappedFile();
+            MappedFile firstMappedFile = this.getFirstMappedFile(); //yangyc 第一个 mappedFile
+            MappedFile lastMappedFile = this.getLastMappedFile(); //yangyc 最后一个 mappedFile
             if (firstMappedFile != null && lastMappedFile != null) {
                 if (offset < firstMappedFile.getFileFromOffset() || offset >= lastMappedFile.getFileFromOffset() + this.mappedFileSize) {
+                    //yangyc 条件成立：说明 offset 没能命中 list 内的 mappedFile
                     LOG_ERROR.warn("Offset not matched. Request offset: {}, firstOffset: {}, lastOffset: {}, mappedFileSize: {}, mappedFiles count: {}",
                         offset,
                         firstMappedFile.getFileFromOffset(),
                         lastMappedFile.getFileFromOffset() + this.mappedFileSize,
                         this.mappedFileSize,
                         this.mappedFiles.size());
-                } else {
+                } else { //yangyc 正常走这里
+                    //yangyc 比如说：commitLog目录有文件：5g、6g、7g、8g、9g。我们要查找offset包含7.6g的mappedFile
+                    //yangyc 计算 mappedFiles 数组下标；  (7.6/1 - 5/1)=2 ==> index=2
                     int index = (int) ((offset / this.mappedFileSize) - (firstMappedFile.getFileFromOffset() / this.mappedFileSize));
                     MappedFile targetFile = null;
                     try {
@@ -480,8 +500,8 @@ public class MappedFileQueue {
                     }
 
                     if (targetFile != null && offset >= targetFile.getFileFromOffset()
-                        && offset < targetFile.getFileFromOffset() + this.mappedFileSize) {
-                        return targetFile;
+                        && offset < targetFile.getFileFromOffset() + this.mappedFileSize) { //yangyc 条件成立：说明 mappedFile 内包含 offset 偏移量
+                        return targetFile; //yangyc 正常从这里返回
                     }
 
                     for (MappedFile tmpMappedFile : this.mappedFiles) {

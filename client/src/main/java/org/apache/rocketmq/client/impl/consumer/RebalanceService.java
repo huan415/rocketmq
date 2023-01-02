@@ -21,6 +21,8 @@ import org.apache.rocketmq.client.log.ClientLogger;
 import org.apache.rocketmq.common.ServiceThread;
 import org.apache.rocketmq.logging.InternalLogger;
 
+//yangyc-main 客户端进行负载均衡策略的启动服务 (负责根据负载均衡策略获取当前客户端分配到的MessageQueue)
+// 默认每隔20s进行一次消息队列负载.
 public class RebalanceService extends ServiceThread {
     private static long waitInterval =
         Long.parseLong(System.getProperty(
@@ -36,8 +38,11 @@ public class RebalanceService extends ServiceThread {
     public void run() {
         log.info(this.getServiceName() + " service started");
 
+        //yangyc-main 死循环
         while (!this.isStopped()) {
+            //yangyc-main 休眠一段时间（默认20s）, 避免线程将 cpu 资源占死
             this.waitForRunning(waitInterval);
+            //yangyc-main 调用客户端实例的负载均衡方法，客户端实例会遍历注册在客户端实例上的全部消费者，调用消费者的负载均衡方法
             this.mqClientFactory.doRebalance();
         }
 

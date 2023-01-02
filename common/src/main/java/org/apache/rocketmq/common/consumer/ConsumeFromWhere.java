@@ -25,6 +25,6 @@ public enum ConsumeFromWhere {
     CONSUME_FROM_MIN_OFFSET,
     @Deprecated
     CONSUME_FROM_MAX_OFFSET,
-    CONSUME_FROM_FIRST_OFFSET,
-    CONSUME_FROM_TIMESTAMP,
+    CONSUME_FROM_FIRST_OFFSET, //yangyc 从有效 offset 的开始 进行消费
+    CONSUME_FROM_TIMESTAMP, //yangyc 从指定时间戳的消息开始消费（距离该时间戳最近的一条消息 offset 开始）
 }

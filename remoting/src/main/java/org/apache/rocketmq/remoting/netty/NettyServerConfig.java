@@ -17,17 +17,17 @@
 package org.apache.rocketmq.remoting.netty;
 
 public class NettyServerConfig implements Cloneable {
-    private int listenPort = 8888;
-    private int serverWorkerThreads = 8;
-    private int serverCallbackExecutorThreads = 0;
-    private int serverSelectorThreads = 3;
-    private int serverOnewaySemaphoreValue = 256;
-    private int serverAsyncSemaphoreValue = 64;
-    private int serverChannelMaxIdleTimeSeconds = 120;
+    private int listenPort = 8888; //yangyc 服务端启动时监听的端口号
+    private int serverWorkerThreads = 8; //yangyc 业务线程池 线程数量
+    private int serverCallbackExecutorThreads = 0; //yangyc 根据该值创建 remotingServer 内部的一个 publicExecutor
+    private int serverSelectorThreads = 3; //yangyc netty worker 组线程数
+    private int serverOnewaySemaphoreValue = 256; //yangyc 服务端单向访问客户端的并发限制
+    private int serverAsyncSemaphoreValue = 64; //yangyc 服务器异步访问客户端的并发限制
+    private int serverChannelMaxIdleTimeSeconds = 120; //yangyc channel 最大空闲的存活时间, 默认是 2min
 
-    private int serverSocketSndBufSize = NettySystemConfig.socketSndbufSize;
-    private int serverSocketRcvBufSize = NettySystemConfig.socketRcvbufSize;
-    private boolean serverPooledByteBufAllocatorEnable = true;
+    private int serverSocketSndBufSize = NettySystemConfig.socketSndbufSize; //yangyc 写缓冲区大小 65535
+    private int serverSocketRcvBufSize = NettySystemConfig.socketRcvbufSize; //yangyc 接收缓冲区大小 65535
+    private boolean serverPooledByteBufAllocatorEnable = true; //yangyc 是否启用 netty 内存池, 默认开启
 
     /**
      * make make install
@@ -36,7 +36,7 @@ public class NettyServerConfig implements Cloneable {
      * ../glibc-2.10.1/configure \ --prefix=/usr \ --with-headers=/usr/include \
      * --host=x86_64-linux-gnu \ --build=x86_64-pc-linux-gnu \ --without-gd
      */
-    private boolean useEpollNativeSelector = false;
+    private boolean useEpollNativeSelector = false; //yangyc 是否启用 epoll。linux 默认会启用
 
     public int getListenPort() {
         return listenPort;

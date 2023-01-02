@@ -34,29 +34,29 @@ import org.apache.rocketmq.remoting.protocol.LanguageCode;
  */
 public class ClientConfig {
     public static final String SEND_MESSAGE_WITH_VIP_CHANNEL_PROPERTY = "com.rocketmq.sendMessageWithVIPChannel";
-    private String namesrvAddr = NameServerAddressUtils.getNameServerAddresses();
-    private String clientIP = RemotingUtil.getLocalAddress();
-    private String instanceName = System.getProperty("rocketmq.client.name", "DEFAULT");
-    private int clientCallbackExecutorThreads = Runtime.getRuntime().availableProcessors();
-    protected String namespace;
+    private String namesrvAddr = NameServerAddressUtils.getNameServerAddresses(); //yangyc nameserver 地址
+    private String clientIP = RemotingUtil.getLocalAddress(); //yangyc 客户端 ip 地址
+    private String instanceName = System.getProperty("rocketmq.client.name", "DEFAULT"); //yangyc 客户端实例名称
+    private int clientCallbackExecutorThreads = Runtime.getRuntime().availableProcessors(); //yangyc 客户端回调线程池的线程数量, 默认核心线程数
+    protected String namespace; //yangyc 命名空间
     protected AccessChannel accessChannel = AccessChannel.LOCAL;
 
     /**
      * Pulling topic information interval from the named server
      */
-    private int pollNameServerInterval = 1000 * 30;
+    private int pollNameServerInterval = 1000 * 30;  //yangyc 获取路由信息的间隔时间周期 30s
     /**
      * Heartbeat interval in microseconds with message broker
      */
-    private int heartbeatBrokerInterval = 1000 * 30;
+    private int heartbeatBrokerInterval = 1000 * 30; //yangyc 客户端与 broker 之间心跳周期 30s
     /**
      * Offset persistent interval for consumer
      */
-    private int persistConsumerOffsetInterval = 1000 * 5;
+    private int persistConsumerOffsetInterval = 1000 * 5;  //yangyc 消费者持久化消费进度的周期 5s
     private long pullTimeDelayMillsWhenException = 1000;
     private boolean unitMode = false;
     private String unitName;
-    private boolean vipChannelEnabled = Boolean.parseBoolean(System.getProperty(SEND_MESSAGE_WITH_VIP_CHANNEL_PROPERTY, "false"));
+    private boolean vipChannelEnabled = Boolean.parseBoolean(System.getProperty(SEND_MESSAGE_WITH_VIP_CHANNEL_PROPERTY, "false"));  //yangyc 是否启用 VIP 通道, broker 启动时会绑定两个端口，其中一个是 vip 通道端口
 
     private boolean useTLS = TlsSystemConfig.tlsEnable;
 

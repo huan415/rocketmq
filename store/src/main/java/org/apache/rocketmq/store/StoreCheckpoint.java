@@ -27,6 +27,7 @@ import org.apache.rocketmq.common.constant.LoggerName;
 import org.apache.rocketmq.logging.InternalLogger;
 import org.apache.rocketmq.logging.InternalLoggerFactory;
 
+//yangyc-main 检查位点对象
 public class StoreCheckpoint {
     private static final InternalLogger log = InternalLoggerFactory.getLogger(LoggerName.STORE_LOGGER_NAME);
     private final RandomAccessFile randomAccessFile;
@@ -62,6 +63,7 @@ public class StoreCheckpoint {
         }
     }
 
+    //yangyc-main 脏数据落盘后, 释放资源（对外内存 fileChannel）
     public void shutdown() {
         this.flush();
 
@@ -75,6 +77,7 @@ public class StoreCheckpoint {
         }
     }
 
+    //yangyc-main mappedByteBuffer 脏数据落盘
     public void flush() {
         this.mappedByteBuffer.putLong(0, this.physicMsgTimestamp);
         this.mappedByteBuffer.putLong(8, this.logicsMsgTimestamp);

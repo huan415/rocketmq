@@ -22,5 +22,6 @@ import org.apache.rocketmq.common.message.MessageExt;
  */
 @Deprecated
 public interface TransactionCheckListener {
+    //yangyc-main 用途：根据 broker 传递的 msg 信息查询该 msg 关联的事务状态
     LocalTransactionState checkLocalTransactionState(final MessageExt msg);
 }

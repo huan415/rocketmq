@@ -72,27 +72,32 @@ public class NettyRemotingClient extends NettyRemotingAbstract implements Remoti
     private static final InternalLogger log = InternalLoggerFactory.getLogger(RemotingHelper.ROCKETMQ_REMOTING);
 
     private static final long LOCK_TIMEOUT_MILLIS = 3000;
-
+    //yangyc 客户端网络层配置
     private final NettyClientConfig nettyClientConfig;
+    //yangyc 客户端网络层启动对象，通过它 boostarp.connect(addr) => NioSocketChannel。 接下来使用这个 ch 就可以与服务器端进行通信
     private final Bootstrap bootstrap = new Bootstrap();
+    //yangyc 客户端网络层 Netty IO 线程组
     private final EventLoopGroup eventLoopGroupWorker;
     private final Lock lockChannelTables = new ReentrantLock();
+    //yangyc channel 映射表。 key: 服务器地址。 value:客户端-服务器channel封装对象
     private final ConcurrentMap<String /* addr */, ChannelWrapper> channelTables = new ConcurrentHashMap<String, ChannelWrapper>();
-
+    //yangyc 定时器
     private final Timer timer = new Timer("ClientHouseKeepingService", true);
 
     private final AtomicReference<List<String>> namesrvAddrList = new AtomicReference<List<String>>();
     private final AtomicReference<String> namesrvAddrChoosed = new AtomicReference<String>();
     private final AtomicInteger namesrvIndex = new AtomicInteger(initValueIndex());
     private final Lock lockNamesrvChannel = new ReentrantLock();
-
+    //yangyc 公共线程池
     private final ExecutorService publicExecutor;
 
     /**
      * Invoke the callback methods in this executor when process response.
      */
+    //yangyc 回调线程池。客户端发起异步请求之后，服务器会响应数据之后，由回调线程处理
     private ExecutorService callbackExecutor;
-    private final ChannelEventListener channelEventListener;
+    private final ChannelEventListener channelEventListener; //yangyc 客户端这里是 null
+    //yangyc Channel pipeline 内的 handler 使用的线程资源
     private DefaultEventExecutorGroup defaultEventExecutorGroup;
 
     public NettyRemotingClient(final NettyClientConfig nettyClientConfig) {
@@ -101,10 +106,11 @@ public class NettyRemotingClient extends NettyRemotingAbstract implements Remoti
 
     public NettyRemotingClient(final NettyClientConfig nettyClientConfig,
         final ChannelEventListener channelEventListener) {
+        //yangyc 创建两个信号量：1.控制单向请求并发度， 2.控制异步请求并发度
         super(nettyClientConfig.getClientOnewaySemaphoreValue(), nettyClientConfig.getClientAsyncSemaphoreValue());
         this.nettyClientConfig = nettyClientConfig;
         this.channelEventListener = channelEventListener;
-
+        //yangyc 创建公共线程池
         int publicThreadNums = nettyClientConfig.getClientCallbackExecutorThreads();
         if (publicThreadNums <= 0) {
             publicThreadNums = 4;
@@ -118,7 +124,7 @@ public class NettyRemotingClient extends NettyRemotingAbstract implements Remoti
                 return new Thread(r, "NettyClientPublicExecutor_" + this.threadIndex.incrementAndGet());
             }
         });
-
+        //yangyc 创建 netty IO 线程池
         this.eventLoopGroupWorker = new NioEventLoopGroup(1, new ThreadFactory() {
             private AtomicInteger threadIndex = new AtomicInteger(0);
 
@@ -149,6 +155,7 @@ public class NettyRemotingClient extends NettyRemotingAbstract implements Remoti
 
     @Override
     public void start() {
+        //yangyc Channel pipeline 内的 handler 使用的线程资源
         this.defaultEventExecutorGroup = new DefaultEventExecutorGroup(
             nettyClientConfig.getClientWorkerThreads(),
             new ThreadFactory() {
@@ -160,7 +167,7 @@ public class NettyRemotingClient extends NettyRemotingAbstract implements Remoti
                     return new Thread(r, "NettyClientWorkerThread_" + this.threadIndex.incrementAndGet());
                 }
             });
-
+        //yangyc 配置 Netty 客户端启动类对象
         Bootstrap handler = this.bootstrap.group(this.eventLoopGroupWorker).channel(NioSocketChannel.class)
             .option(ChannelOption.TCP_NODELAY, true)
             .option(ChannelOption.SO_KEEPALIVE, false)
@@ -185,10 +192,11 @@ public class NettyRemotingClient extends NettyRemotingAbstract implements Remoti
                         new NettyDecoder(),
                         new IdleStateHandler(0, 0, nettyClientConfig.getClientChannelMaxIdleTimeSeconds()),
                         new NettyConnectManageHandler(),
-                        new NettyClientHandler());
+                        new NettyClientHandler()); //yangyc-main 服务端响应回来，唤醒等待线程或回调。processResponseCommand(ctx, cmd); responseFuture.putResponse(cmd); this.countDownLatch.countDown();
                 }
             });
-
+        //yangyc 注意：Bootstrap 仅仅配置好了客户端数据，在这里并没有创建任何 ch 对象
+        //yangyc 定时扫描 responseTable 中超时的 responseFuture, 避免客户端长时间阻塞
         this.timer.scheduleAtFixedRate(new TimerTask() {
             @Override
             public void run() {
@@ -361,20 +369,23 @@ public class NettyRemotingClient extends NettyRemotingAbstract implements Remoti
             }
         }
     }
-
+    //yangyc-main 参数1：服务器地址,参数2：网络层传输对象（封装了请求数据）,参数3：超时时间限制
     @Override
     public RemotingCommand invokeSync(String addr, final RemotingCommand request, long timeoutMillis)
         throws InterruptedException, RemotingConnectException, RemotingSendRequestException, RemotingTimeoutException {
-        long beginStartTime = System.currentTimeMillis();
-        final Channel channel = this.getAndCreateChannel(addr);
-        if (channel != null && channel.isActive()) {
+        long beginStartTime = System.currentTimeMillis(); //yangyc 开始时间
+        final Channel channel = this.getAndCreateChannel(addr); //yangyc 获取或者创建 channel 通道
+        if (channel != null && channel.isActive()) { //yangyc 条件成立：说明客户端与服务端 channel 通道正常，可以通信
             try {
+                //yangyc-main 执行 rpcHook before， 框架留给用户的扩展点
                 doBeforeRpcHooks(addr, request);
-                long costTime = System.currentTimeMillis() - beginStartTime;
-                if (timeoutMillis < costTime) {
+                long costTime = System.currentTimeMillis() - beginStartTime; //yangyc 计算耗时
+                if (timeoutMillis < costTime) { //yangyc 如果当前耗时已经超过 timeoutMillis，则直接抛异常
                     throw new RemotingTimeoutException("invokeSync call timeout");
                 }
+                //yangyc-main 返回值：服务端响应数据。参数1：客户端-服务端channel通道 参数2:网络层传输对象（封装了请求数据）,参数3：剩余超时时间
                 RemotingCommand response = this.invokeSyncImpl(channel, request, timeoutMillis - costTime);
+                //yangyc-main 执行 rpcHook after， 框架留给用户的扩展点
                 doAfterRpcHooks(RemotingHelper.parseChannelRemoteAddr(channel), request, response);
                 return response;
             } catch (RemotingSendRequestException e) {
@@ -394,7 +405,7 @@ public class NettyRemotingClient extends NettyRemotingAbstract implements Remoti
             throw new RemotingConnectException(addr);
         }
     }
-
+    //yangyc 获取或者创建 channel 通道
     private Channel getAndCreateChannel(final String addr) throws RemotingConnectException, InterruptedException {
         if (null == addr) {
             return getAndCreateNameserverChannel();

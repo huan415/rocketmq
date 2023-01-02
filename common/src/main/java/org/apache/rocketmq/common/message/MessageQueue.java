@@ -20,9 +20,9 @@ import java.io.Serializable;
 
 public class MessageQueue implements Comparable<MessageQueue>, Serializable {
     private static final long serialVersionUID = 6191200464116433425L;
-    private String topic;
-    private String brokerName;
-    private int queueId;
+    private String topic; //yangyc 队列归属主题
+    private String brokerName; //yangyc 队列归属 broker
+    private int queueId; //yangyc 队列在当前 broker 的 id
 
     public MessageQueue() {
 

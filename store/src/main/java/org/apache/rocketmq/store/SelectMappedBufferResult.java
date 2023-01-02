@@ -35,6 +35,7 @@ public class SelectMappedBufferResult {
         this.mappedFile = mappedFile;
     }
 
+    //yangyc-main 获取 byteBuffer
     public ByteBuffer getByteBuffer() {
         return byteBuffer;
     }
@@ -55,6 +56,7 @@ public class SelectMappedBufferResult {
 //        }
 //    }
 
+    //yangyc-main 调用 mappedFile.release()；
     public synchronized void release() {
         if (this.mappedFile != null) {
             this.mappedFile.release();

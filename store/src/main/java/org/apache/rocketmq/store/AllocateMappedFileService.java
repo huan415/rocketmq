@@ -34,11 +34,14 @@ import org.apache.rocketmq.store.config.BrokerRole;
 /**
  * Create MappedFile in advance
  */
+//yangyc-main 创建 mappedFile 服务
 public class AllocateMappedFileService extends ServiceThread {
     private static final InternalLogger log = InternalLoggerFactory.getLogger(LoggerName.STORE_LOGGER_NAME);
     private static int waitTimeOut = 1000 * 5;
+    //yangyc-main key:filePath  value:AllocateRequest
     private ConcurrentMap<String, AllocateRequest> requestTable =
         new ConcurrentHashMap<String, AllocateRequest>();
+    //yangyc-main 优先级队列
     private PriorityBlockingQueue<AllocateRequest> requestQueue =
         new PriorityBlockingQueue<AllocateRequest>();
     private volatile boolean hasException = false;
@@ -48,6 +51,7 @@ public class AllocateMappedFileService extends ServiceThread {
         this.messageStore = messageStore;
     }
 
+    //yangyc-main ”提交内存映射文件“ 创建任务, 并且阻塞等待 nextFilePath 对应的文件创建完毕, 返回该 mappedFile
     public MappedFile putRequestAndReturnMappedFile(String nextFilePath, String nextNextFilePath, int fileSize) {
         int canSubmitRequests = 2;
         if (this.messageStore.getMessageStoreConfig().isTransientStorePoolEnable()) {
@@ -57,6 +61,7 @@ public class AllocateMappedFileService extends ServiceThread {
             }
         }
 
+        //yangyc-main 创建 nextFilePath 的 AllocateRequest 对象, 放入到 requestTable 和 优先队列
         AllocateRequest nextReq = new AllocateRequest(nextFilePath, fileSize);
         boolean nextPutOK = this.requestTable.putIfAbsent(nextFilePath, nextReq) == null;
 
@@ -74,6 +79,7 @@ public class AllocateMappedFileService extends ServiceThread {
             canSubmitRequests--;
         }
 
+        //yangyc-main 创建 nextNextFilePath 的 AllocateRequest 对象, 放入到 requestTable 和 优先队列
         AllocateRequest nextNextReq = new AllocateRequest(nextNextFilePath, fileSize);
         boolean nextNextPutOK = this.requestTable.putIfAbsent(nextNextFilePath, nextNextReq) == null;
         if (nextNextPutOK) {
@@ -97,7 +103,10 @@ public class AllocateMappedFileService extends ServiceThread {
         AllocateRequest result = this.requestTable.get(nextFilePath);
         try {
             if (result != null) {
+                //yangyc-main 调用线程在 nextFile 对应的 AllocateRequest.CountDownLatch().await() 直到超时 或者 allocateRequest.mappedFile 创建完毕
                 boolean waitOK = result.getCountDownLatch().await(waitTimeOut, TimeUnit.MILLISECONDS);
+                //yangyc-main 如果上一步创建完成, 则将 nextFile 的 AllocateRequest 从 requestTable 移除
+                // 创建成功返回 MappedFile 实例, 超时：返回 null。
                 if (!waitOK) {
                     log.warn("create mmap timeout " + result.getFilePath() + " " + result.getFileSize());
                     return null;
@@ -131,9 +140,11 @@ public class AllocateMappedFileService extends ServiceThread {
         }
     }
 
+    //yangyc-main 基于优先队列的任务线程, 会处理该队列内的每个 ”分配请求“, 创建对应的 mappedFile, 将结果设置到 request 内, 唤醒等待结果的线程
     public void run() {
         log.info(this.getServiceName() + " service started");
 
+        //yangyc-main 工作线程在优先队列这里等待可处理数据
         while (!this.isStopped() && this.mmapOperation()) {
 
         }
@@ -147,6 +158,7 @@ public class AllocateMappedFileService extends ServiceThread {
         boolean isSuccess = false;
         AllocateRequest req = null;
         try {
+            //yangyc-main 获取到 AllocateRequest, 根据 request 的 filePath fileSize 创建 MappedFile 对象
             req = this.requestQueue.take();
             AllocateRequest expectedRequest = this.requestTable.get(req.getFilePath());
             if (null == expectedRequest) {
@@ -183,6 +195,7 @@ public class AllocateMappedFileService extends ServiceThread {
                         + " " + req.getFilePath() + " " + req.getFileSize());
                 }
 
+                //yangyc-main 如果 fileSize >= 1G; 调用 mappedFile 预热文件方法
                 // pre write mappedFile
                 if (mappedFile.getFileSize() >= this.messageStore.getMessageStoreConfig()
                     .getMappedFileSizeCommitLog()
@@ -192,6 +205,7 @@ public class AllocateMappedFileService extends ServiceThread {
                         this.messageStore.getMessageStoreConfig().getFlushLeastPagesWhenWarmMapedFile());
                 }
 
+                //yangyc-main 将创建的 mappedFile 设置回 request 内, 并唤醒等待线程
                 req.setMappedFile(mappedFile);
                 this.hasException = false;
                 isSuccess = true;

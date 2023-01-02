@@ -24,16 +24,16 @@ import org.apache.rocketmq.remoting.exception.RemotingCommandException;
 
 public class ConsumerSendMsgBackRequestHeader implements CommandCustomHeader {
     @CFNotNull
-    private Long offset;
+    private Long offset; //yangyc-main 回退消息的 commitlog offset
     @CFNotNull
-    private String group;
+    private String group; //yangyc-main 消费者组
     @CFNotNull
-    private Integer delayLevel;
-    private String originMsgId;
-    private String originTopic;
+    private Integer delayLevel; //yangyc-main 延迟级别（一般都是 0）
+    private String originMsgId; //yangyc-main 原始消息 msgId
+    private String originTopic; //yangyc-main 原始消息 主题
     @CFNullable
     private boolean unitMode = false;
-    private Integer maxReconsumeTimes;
+    private Integer maxReconsumeTimes; //yangyc-main 最大重试次数（默认 16）
 
     @Override
     public void checkFields() throws RemotingCommandException {

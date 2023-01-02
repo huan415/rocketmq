@@ -96,33 +96,34 @@ import org.apache.rocketmq.remoting.exception.RemotingTooMuchRequestException;
 
 public class DefaultMQProducerImpl implements MQProducerInner {
     private final InternalLogger log = ClientLogger.getLog();
-    private final Random random = new Random();
-    private final DefaultMQProducer defaultMQProducer;
-    private final ConcurrentMap<String/* topic */, TopicPublishInfo> topicPublishInfoTable =
+    private final Random random = new Random(); //yangyc 生成 invokeID, 无实际业务意义, 打印日志使用
+    private final DefaultMQProducer defaultMQProducer;  //yangyc-main 生产者门面对象, 在这里主要当做 config 使用
+    private final ConcurrentMap<String/* topic */, TopicPublishInfo> topicPublishInfoTable =  //yangyc-main 主题发布信息映射表, key:主题, value:主题发布信息
         new ConcurrentHashMap<String, TopicPublishInfo>();
-    private final ArrayList<SendMessageHook> sendMessageHookList = new ArrayList<SendMessageHook>();
-    private final RPCHook rpcHook;
-    private final BlockingQueue<Runnable> asyncSenderThreadPoolQueue;
-    private final ExecutorService defaultAsyncSenderExecutor;
-    private final Timer timer = new Timer("RequestHouseKeepingService", true);
-    protected BlockingQueue<Runnable> checkRequestQueue;
-    protected ExecutorService checkExecutor;
-    private ServiceState serviceState = ServiceState.CREATE_JUST;
-    private MQClientInstance mQClientFactory;
-    private ArrayList<CheckForbiddenHook> checkForbiddenHookList = new ArrayList<CheckForbiddenHook>();
-    private int zipCompressLevel = Integer.parseInt(System.getProperty(MixAll.MESSAGE_COMPRESS_LEVEL, "5"));
-    private MQFaultStrategy mqFaultStrategy = new MQFaultStrategy();
-    private ExecutorService asyncSenderExecutor;
+    private final ArrayList<SendMessageHook> sendMessageHookList = new ArrayList<SendMessageHook>();  //yangyc-main 发送消息的钩子。留给用户扩展框架使用
+    private final RPCHook rpcHook;  //yangyc rpc Hook 最终传递给 NettyRemotingClient.留给用户扩展框架使用
+    private final BlockingQueue<Runnable> asyncSenderThreadPoolQueue; //yangyc 异步任务发送消息, 异步任务线程池使用的队列
+    private final ExecutorService defaultAsyncSenderExecutor;  //yangyc 缺省的异步发送消息线程池
+    private final Timer timer = new Timer("RequestHouseKeepingService", true); //yangyc 定时任务, 执行：RequestFutureTable.scanExpiredRequest();
+    protected BlockingQueue<Runnable> checkRequestQueue; //yangyc-main 事务回查任务队列
+    protected ExecutorService checkExecutor;//yangyc-main 事务消息回查任务线程池
+    private ServiceState serviceState = ServiceState.CREATE_JUST; //yangyc 状态
+    private MQClientInstance mQClientFactory; //yangyc 客户端实例对象。生产者启动后,需要注册到客户端对象内
+    private ArrayList<CheckForbiddenHook> checkForbiddenHookList = new ArrayList<CheckForbiddenHook>(); //yangyc 注意和 sendMessageHook 区别：它可以抛异常, 控制消息是否发送
+    private int zipCompressLevel = Integer.parseInt(System.getProperty(MixAll.MESSAGE_COMPRESS_LEVEL, "5")); //yangyc zip 压缩算法的压缩区分，默认 5
+    private MQFaultStrategy mqFaultStrategy = new MQFaultStrategy(); //yangyc 选择队列容错队列
+    private ExecutorService asyncSenderExecutor; //yangyc-main 异步发送线程池，没有指定，则使用 defaultAsyncSenderExecutor
 
     public DefaultMQProducerImpl(final DefaultMQProducer defaultMQProducer) {
         this(defaultMQProducer, null);
     }
-
+    //yangyc 创建生产者实现对线。参数1：生产者门面对象, 参数2：rpcHook
     public DefaultMQProducerImpl(final DefaultMQProducer defaultMQProducer, RPCHook rpcHook) {
         this.defaultMQProducer = defaultMQProducer;
         this.rpcHook = rpcHook;
-
+        //yangyc 创建异步消息线程池任务队列, 长度 5w
         this.asyncSenderThreadPoolQueue = new LinkedBlockingQueue<Runnable>(50000);
+        //yangyc 缺省的异步消息任务线程池
         this.defaultAsyncSenderExecutor = new ThreadPoolExecutor(
             Runtime.getRuntime().availableProcessors(),
             Runtime.getRuntime().availableProcessors(),
@@ -176,18 +177,19 @@ public class DefaultMQProducerImpl implements MQProducerInner {
     }
 
     public void start(final boolean startFactory) throws MQClientException {
+        //yangyc-main 服务状态， 在启动是 CREATE_JUST
         switch (this.serviceState) {
-            case CREATE_JUST:
-                this.serviceState = ServiceState.START_FAILED;
+            case CREATE_JUST: //yangyc 看上面属性初始化，给的是 CREATE_JUST
+                this.serviceState = ServiceState.START_FAILED; //yangyc 默认修改状态为启动失败, 后面启动成功再修改成启动成功
 
-                this.checkConfig();
+                this.checkConfig(); //yangyc 判断生产者组名不能为空、MixAll.DEFAULT_PRODUCER_GROUP
 
-                if (!this.defaultMQProducer.getProducerGroup().equals(MixAll.CLIENT_INNER_PRODUCER_GROUP)) {
-                    this.defaultMQProducer.changeInstanceNameToPID();
+                if (!this.defaultMQProducer.getProducerGroup().equals(MixAll.CLIENT_INNER_PRODUCER_GROUP)) { //yangyc 条件成立：说明生产者不是内部生产者（内部生产者：处理消息回退这种情况使用的生产者）
+                    this.defaultMQProducer.changeInstanceNameToPID(); //yangyc 修改生产者实例名称为当进程 PID
                 }
-
+                //yangyc-main 获取当前进程的 RocketMQ 客户端实例对象
                 this.mQClientFactory = MQClientManager.getInstance().getOrCreateMQClientInstance(this.defaultMQProducer, rpcHook);
-
+                //yangyc-main 将生产者自己注册到 RocketMQ 客户端实例内（观察者模式）
                 boolean registerOK = mQClientFactory.registerProducer(this.defaultMQProducer.getProducerGroup(), this);
                 if (!registerOK) {
                     this.serviceState = ServiceState.CREATE_JUST;
@@ -195,16 +197,16 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                         + "] has been created before, specify another name please." + FAQUrl.suggestTodo(FAQUrl.GROUP_NAME_DUPLICATE_URL),
                         null);
                 }
-
+                //yangyc 添加一个主题发布信息，key:TBW102, value:空对象
                 this.topicPublishInfoTable.put(this.defaultMQProducer.getCreateTopicKey(), new TopicPublishInfo());
 
                 if (startFactory) {
-                    mQClientFactory.start();
+                    mQClientFactory.start(); //yangyc-main 启动 RocketMQ 客户端实例对象 (启动一大堆服务)
                 }
 
                 log.info("the producer [{}] start OK. sendMessageWithVIPChannel={}", this.defaultMQProducer.getProducerGroup(),
                     this.defaultMQProducer.isSendMessageWithVIPChannel());
-                this.serviceState = ServiceState.RUNNING;
+                this.serviceState = ServiceState.RUNNING; //yangyc 设置生产者状态为：运行中
                 break;
             case RUNNING:
             case START_FAILED:
@@ -216,9 +218,15 @@ public class DefaultMQProducerImpl implements MQProducerInner {
             default:
                 break;
         }
-
+        //yangyc 强制 RocketMQ 客户端实例 向已知的 broekr 节点发送一次心跳
         this.mQClientFactory.sendHeartbeatToAllBrokerWithLock();
-
+        //yangyc request 发送的消息需要消费组回执一条消息。怎么实现？
+        //yangyc 1. 生产者 msg 包含：关联ID、客户端ID。发送到 broker
+        //yangyc 2. 消费组从 broker 拿到这条消息, 检查 msg 类型, 发现是一条需要回执的消息, 消费组处理完消息之后, 将 关联ID和客户端ID封装成响应结果 发送到 broker
+        //yangyc 3. Broker 拿到这条消息之后,  知道是一条回执消息, 根据客户端 ID 找到 ch, 将消息发给生产者
+        //yangyc 4. 生产者拿到回执消息之后, 拿到 关联ID 找到对应的 RequestFuture, 将阻塞的线程唤醒
+        //yangyc 类似于 生产者和消费者 直接进行了一次 RPC, 只不过中间由 broker 代理完成的
+        //yangyc 定时任务处理 回执太慢 的情况
         this.timer.scheduleAtFixedRate(new TimerTask() {
             @Override
             public void run() {
@@ -311,6 +319,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
         return null;
     }
 
+    //yangyc-main 执行回查事务状态任务，并提交到 checkExecutor 线程池执行。 参数1：与本地事务强相关的消息  参数2：本地事务逻辑封装（可能是null） 参数3：本地事务执行依赖的参数，一般是普通的pojo
     @Override
     public void checkTransactionState(final String addr, final MessageExt msg,
         final CheckTransactionStateRequestHeader header) {
@@ -322,12 +331,14 @@ public class DefaultMQProducerImpl implements MQProducerInner {
 
             @Override
             public void run() {
+                //yangyc-main 获取生产者的 transactionCheckListener 和 transactionListener
                 TransactionCheckListener transactionCheckListener = DefaultMQProducerImpl.this.checkListener();
                 TransactionListener transactionListener = getCheckListener();
                 if (transactionCheckListener != null || transactionListener != null) {
                     LocalTransactionState localTransactionState = LocalTransactionState.UNKNOW;
                     Throwable exception = null;
                     try {
+                        //yangyc-main 其中一个不为 null 的 Listener 进行事务状态回查, 得到结果
                         if (transactionCheckListener != null) {
                             localTransactionState = transactionCheckListener.checkLocalTransactionState(message);
                         } else if (transactionListener != null) {
@@ -354,6 +365,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                 final LocalTransactionState localTransactionState,
                 final String producerGroup,
                 final Throwable exception) {
+                //yangyc-main 构建 EndTransactionRequestHeader 对象
                 final EndTransactionRequestHeader thisHeader = new EndTransactionRequestHeader();
                 thisHeader.setCommitLogOffset(checkRequestHeader.getCommitLogOffset());
                 thisHeader.setProducerGroup(producerGroup);
@@ -388,6 +400,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                 }
 
                 try {
+                    //yangyc-main 向 broker 发起 endTransactionOneway 请求
                     DefaultMQProducerImpl.this.mQClientFactory.getMQClientAPIImpl().endTransactionOneway(brokerAddr, thisHeader, remark,
                         3000);
                 } catch (Exception e) {
@@ -524,7 +537,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
         }
 
     }
-
+    //yangyc 从发布信息中选择一个队列，参数1：主题发布信息，参数2：上一次发送失败的brokerName
     public MessageQueue selectOneMessageQueue(final TopicPublishInfo tpInfo, final String lastBrokerName) {
         return this.mqFaultStrategy.selectOneMessageQueue(tpInfo, lastBrokerName);
     }
@@ -541,62 +554,63 @@ public class DefaultMQProducerImpl implements MQProducerInner {
         }
 
     }
-
+    //yangyc-main 发送消息。 参数1：msg. 参数2：发送模型-同步 参数3：回调，同步不需要，所以是null  参数4: 超时发送时间（默认3s）
     private SendResult sendDefaultImpl(
         Message msg,
         final CommunicationMode communicationMode,
         final SendCallback sendCallback,
         final long timeout
     ) throws MQClientException, RemotingException, MQBrokerException, InterruptedException {
-        this.makeSureStateOK();
-        Validators.checkMessage(msg, this.defaultMQProducer);
-        final long invokeID = random.nextLong();
-        long beginTimestampFirst = System.currentTimeMillis();
-        long beginTimestampPrev = beginTimestampFirst;
-        long endTimestamp = beginTimestampFirst;
-        TopicPublishInfo topicPublishInfo = this.tryToFindTopicPublishInfo(msg.getTopic());
+        this.makeSureStateOK(); //yangyc 确定生产者状态是运行中， 否则抛异常
+        Validators.checkMessage(msg, this.defaultMQProducer); //yangyc 判断消息规格
+        final long invokeID = random.nextLong(); //yangyc 生产一个调用 ID，打印日志使用
+        long beginTimestampFirst = System.currentTimeMillis(); //yangyc 发送的开始时间
+        long beginTimestampPrev = beginTimestampFirst; //yangyc 本轮发送开始时间
+        long endTimestamp = beginTimestampFirst; //yangyc 本轮发送结束时间
+        TopicPublishInfo topicPublishInfo = this.tryToFindTopicPublishInfo(msg.getTopic()); //yangyc-main 获取当前消息 主题的发布信息. 需要依赖它里面的 MessageQueues, 选择一个队列去发送消息
         if (topicPublishInfo != null && topicPublishInfo.ok()) {
-            boolean callTimeout = false;
-            MessageQueue mq = null;
-            Exception exception = null;
-            SendResult sendResult = null;
-            int timesTotal = communicationMode == CommunicationMode.SYNC ? 1 + this.defaultMQProducer.getRetryTimesWhenSendFailed() : 1;
-            int times = 0;
-            String[] brokersSent = new String[timesTotal];
-            for (; times < timesTotal; times++) {
-                String lastBrokerName = null == mq ? null : mq.getBrokerName();
-                MessageQueue mqSelected = this.selectOneMessageQueue(topicPublishInfo, lastBrokerName);
-                if (mqSelected != null) {
+            boolean callTimeout = false; //yangyc 是否超时
+            MessageQueue mq = null; //yangyc 选中的队列
+            Exception exception = null; //yangyc 异常
+            SendResult sendResult = null; //yangyc 发送结果
+            int timesTotal = communicationMode == CommunicationMode.SYNC ? 1 + this.defaultMQProducer.getRetryTimesWhenSendFailed() : 1; //yangyc 发送从尝试次数。异步是1，同步1+重试次数
+            int times = 0; //yangyc 当前是第几次发送
+            String[] brokersSent = new String[timesTotal]; //yangyc 下标：代表第几次发送。值:代表这次发送选择的 brokerName
+            for (; times < timesTotal; times++) { //yangyc 循环发送，结束条件：1. 发送成功，2：发送尝试次数达到上限
+                String lastBrokerName = null == mq ? null : mq.getBrokerName(); //yangyc 上次发送的 brokerName ，第一次发送时 lastBrokerName 是null
+                MessageQueue mqSelected = this.selectOneMessageQueue(topicPublishInfo, lastBrokerName); //yangyc-main 从发布信息中选择一个队列，参数1：主题发布信息，参数2：上一次发送失败的brokerName
+                if (mqSelected != null) { //yangyc 条件成立：说明已经选择出一个可以发送的 MessageQueue
                     mq = mqSelected;
+                    //yangyc-main 根据队列找到 Broker
                     brokersSent[times] = mq.getBrokerName();
                     try {
-                        beginTimestampPrev = System.currentTimeMillis();
+                        beginTimestampPrev = System.currentTimeMillis(); //yangyc 记录本轮发送的开始时间
                         if (times > 0) {
                             //Reset topic with namespace during resend.
                             msg.setTopic(this.defaultMQProducer.withNamespace(msg.getTopic()));
                         }
-                        long costTime = beginTimestampPrev - beginTimestampFirst;
+                        long costTime = beginTimestampPrev - beginTimestampFirst; //yangyc 计算本轮执行到这一步的耗时。如果超过 timeout 限制，则直接结束不发送
                         if (timeout < costTime) {
                             callTimeout = true;
                             break;
                         }
-
+                        //yangyc-main 实际发送消息 参数1：msg，参数2：选择的队列，参数3：发送模式，参数4：异步发送时，需要传一个回调处理对象，同步或单向时为null，参数5：主题发布信息，参数6：剩余耗时限制
                         sendResult = this.sendKernelImpl(msg, mq, communicationMode, sendCallback, topicPublishInfo, timeout - costTime);
-                        endTimestamp = System.currentTimeMillis();
+                        endTimestamp = System.currentTimeMillis(); //yangyc 本轮发送结束时间
                         this.updateFaultItem(mq.getBrokerName(), endTimestamp - beginTimestampPrev, false);
                         switch (communicationMode) {
                             case ASYNC:
-                                return null;
+                                return null; //yangyc 异步返回null, 返回值由 sendCallback 和回调线程处理
                             case ONEWAY:
-                                return null;
+                                return null; //yangyc 单向返回null, 服务器不返回任何数据
                             case SYNC:
-                                if (sendResult.getSendStatus() != SendStatus.SEND_OK) {
-                                    if (this.defaultMQProducer.isRetryAnotherBrokerWhenNotStoreOK()) {
-                                        continue;
+                                if (sendResult.getSendStatus() != SendStatus.SEND_OK) { //yangyc 条件成立：说明服务端 broker 存储失败
+                                    if (this.defaultMQProducer.isRetryAnotherBrokerWhenNotStoreOK()) {//yangyc 消息未存粹成功, 是否选择其他 broker 节点进行消息重试。一般需要设置成 true
+                                        continue; //yangyc 重试
                                     }
                                 }
 
-                                return sendResult;
+                                return sendResult; //yangyc 正常从这里返回
                             default:
                                 break;
                         }
@@ -649,9 +663,9 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                     break;
                 }
             }
-
+            //yangyc 一般执行到这里有三种情况：1.for 尝试发送了几次都没有成功，2.sendKernelImpl() 异常，此时sendResult为null  3.发送超时
             if (sendResult != null) {
-                return sendResult;
+                return sendResult; //yangyc 情况1：for 尝试发送了几次都没有成功
             }
 
             String info = String.format("Send [%d] times, still failed, cost [%d]ms, Topic: %s, BrokersSent: %s",
@@ -663,10 +677,10 @@ public class DefaultMQProducerImpl implements MQProducerInner {
             info += FAQUrl.suggestTodo(FAQUrl.SEND_MSG_FAILED);
 
             MQClientException mqClientException = new MQClientException(info, exception);
-            if (callTimeout) {
+            if (callTimeout) { //yangyc 情况3.发送超时
                 throw new RemotingTooMuchRequestException("sendDefaultImpl call timeout");
             }
-
+            //yangyc 情况2.sendKernelImpl() 异常
             if (exception instanceof MQBrokerException) {
                 mqClientException.setResponseCode(((MQBrokerException) exception).getResponseCode());
             } else if (exception instanceof RemotingConnectException) {
@@ -681,49 +695,56 @@ public class DefaultMQProducerImpl implements MQProducerInner {
         }
 
         validateNameServerSetting();
-
+        //yangyc 未找到当前主题的路由数据异常。。。没有办法发送
         throw new MQClientException("No route info of this topic: " + msg.getTopic() + FAQUrl.suggestTodo(FAQUrl.NO_TOPIC_ROUTE_INFO),
             null).setResponseCode(ClientErrorCode.NOT_FOUND_TOPIC_EXCEPTION);
     }
-
-    private TopicPublishInfo tryToFindTopicPublishInfo(final String topic) {
-        TopicPublishInfo topicPublishInfo = this.topicPublishInfoTable.get(topic);
-        if (null == topicPublishInfo || !topicPublishInfo.ok()) {
-            this.topicPublishInfoTable.putIfAbsent(topic, new TopicPublishInfo());
-            this.mQClientFactory.updateTopicRouteInfoFromNameServer(topic);
-            topicPublishInfo = this.topicPublishInfoTable.get(topic);
+    //yangyc 获取当前消息 主题的发布信息. 需要依赖它里面的 MessageQueues, 选择一个队列去发送消息
+    private TopicPublishInfo tryToFindTopicPublishInfo(final String topic) { //yangyc 参数：主题
+        TopicPublishInfo topicPublishInfo = this.topicPublishInfoTable.get(topic);  //yangyc 从生产者 本地主题发布信息映射表 尝试获取主题发布信息
+        if (null == topicPublishInfo || !topicPublishInfo.ok()) { //yangyc 条件成立：说明生产者本地保存的指定 topic 发布信息是空的。需要从客户端获取主题发布信息
+            this.topicPublishInfoTable.putIfAbsent(topic, new TopicPublishInfo()); //yangyc 向生产者保存一份该 topic 空的发布信息
+            this.mQClientFactory.updateTopicRouteInfoFromNameServer(topic); //yangyc 让客户端从 nameserver 更新该主题的路由数据
+            topicPublishInfo = this.topicPublishInfoTable.get(topic); //yangyc 正常情况:这一步再拿到的主题发布信息是有数据的。特殊情况：因为nameserver并没有topic的路由数据，所以topicPublishInfo还是null
         }
 
-        if (topicPublishInfo.isHaveTopicRouterInfo() || topicPublishInfo.ok()) {
+        if (topicPublishInfo.isHaveTopicRouterInfo() || topicPublishInfo.ok()) {  //yangyc 条件成立：说明发布信息可用
             return topicPublishInfo;
         } else {
+            //yangyc 特殊情况：因为nameserver并没有topic的路由数据，所以topicPublishInfo还是null
+            //yangyc 参数1：主题，参数2：isDefault true 参数3：生产者对象
             this.mQClientFactory.updateTopicRouteInfoFromNameServer(topic, true, this.defaultMQProducer);
             topicPublishInfo = this.topicPublishInfoTable.get(topic);
             return topicPublishInfo;
         }
     }
-
+    //yangyc 参数1：msg，参数2：选择的队列，参数3：发送模式，参数4：异步发送时，需要传一个回调处理对象，同步或单向时为null，参数5：主题发布信息，参数6：剩余耗时限制
     private SendResult sendKernelImpl(final Message msg,
         final MessageQueue mq,
         final CommunicationMode communicationMode,
         final SendCallback sendCallback,
         final TopicPublishInfo topicPublishInfo,
         final long timeout) throws MQClientException, RemotingException, MQBrokerException, InterruptedException {
-        long beginStartTime = System.currentTimeMillis();
+        long beginStartTime = System.currentTimeMillis(); //yangyc 开始时间
+        //yangyc-main 获取指定 brokerName 的主机地址 master 节点 addr.(本地缓存中先找 Broker, 找不到就去 NameServer 拉)
         String brokerAddr = this.mQClientFactory.findBrokerAddressInPublish(mq.getBrokerName());
         if (null == brokerAddr) {
             tryToFindTopicPublishInfo(mq.getTopic());
             brokerAddr = this.mQClientFactory.findBrokerAddressInPublish(mq.getBrokerName());
         }
 
-        SendMessageContext context = null;
+        SendMessageContext context = null; //yangyc 执行 sendMessageHook 时使用的 context
         if (brokerAddr != null) {
+            //yangyc broker 启动的时候会绑定两个服务端口。1：普通端口，2：VIP端口（服务器根据不同的端口创建NioSocketChannel,提供线程资源不是同一组）
+            //yangyc 如果客户端开启了走 VIP 通道的话，broker 地址的端口将是 VIP 通道的端口号，
             brokerAddr = MixAll.brokerVIPChannel(this.defaultMQProducer.isSendMessageWithVIPChannel(), brokerAddr);
 
-            byte[] prevBody = msg.getBody();
+            byte[] prevBody = msg.getBody(); //yangyc 获取消息体
             try {
                 //for MessageBatch,ID has been set in the generating process
-                if (!(msg instanceof MessageBatch)) {
+                if (!(msg instanceof MessageBatch)) { //yangyc msgId 由前缀+内容组成。前缀：ip地址，进程号，classLoader的hashCode, 内存：时间差（当前时间减去当前1日），计数器
+                    //yangyc 给消息生成唯一ID, 即在msg.properties.put("uniq_key","msgId")
+                    //yangyc 服务器 broker 会给消息按照 UNIQ_KEy 建立一个 hash 索引
                     MessageClientIDSetter.setUniqID(msg);
                 }
 
@@ -735,8 +756,8 @@ public class DefaultMQProducerImpl implements MQProducerInner {
 
                 int sysFlag = 0;
                 boolean msgBodyCompressed = false;
-                if (this.tryToCompressMessage(msg)) {
-                    sysFlag |= MessageSysFlag.COMPRESSED_FLAG;
+                if (this.tryToCompressMessage(msg)) { //yangyc 返回 true,说明消息已经压缩了
+                    sysFlag |= MessageSysFlag.COMPRESSED_FLAG; //yangyc 设置标记位，表明此消息已经被压缩过了
                     msgBodyCompressed = true;
                 }
 
@@ -745,7 +766,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                     sysFlag |= MessageSysFlag.TRANSACTION_PREPARED_TYPE;
                 }
 
-                if (hasCheckForbiddenHook()) {
+                if (hasCheckForbiddenHook()) { //yangyc 用户扩展点，用户可以注册 CheckForbiddenHook 控制消息发送
                     CheckForbiddenContext checkForbiddenContext = new CheckForbiddenContext();
                     checkForbiddenContext.setNameSrvAddr(this.defaultMQProducer.getNamesrvAddr());
                     checkForbiddenContext.setGroup(this.defaultMQProducer.getProducerGroup());
@@ -757,7 +778,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                     this.executeCheckForbiddenHook(checkForbiddenContext);
                 }
 
-                if (this.hasSendMessageHook()) {
+                if (this.hasSendMessageHook()) { //yangyc 用户扩展点，执行 msgHook.before 方法（比如实现监控埋点）
                     context = new SendMessageContext();
                     context.setProducer(this);
                     context.setProducerGroup(this.defaultMQProducer.getProducerGroup());
@@ -779,18 +800,28 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                 }
 
                 SendMessageRequestHeader requestHeader = new SendMessageRequestHeader();
+                //yangyc 生产者组
                 requestHeader.setProducerGroup(this.defaultMQProducer.getProducerGroup());
+                //yangyc 消息主题
                 requestHeader.setTopic(msg.getTopic());
+                //yangyc 缺省主题：TBW102
                 requestHeader.setDefaultTopic(this.defaultMQProducer.getCreateTopicKey());
+                //yangyc 生产者主题队列数：4
                 requestHeader.setDefaultTopicQueueNums(this.defaultMQProducer.getDefaultTopicQueueNums());
+                //yangyc 选中的消息队列，队列ID
                 requestHeader.setQueueId(mq.getQueueId());
+                //yangyc 系统标记变量
                 requestHeader.setSysFlag(sysFlag);
+                //yangyc 消息的创建时间
                 requestHeader.setBornTimestamp(System.currentTimeMillis());
+                //yangyc 消息的 flag
                 requestHeader.setFlag(msg.getFlag());
+                //yangyc 消息的 Properties
                 requestHeader.setProperties(MessageDecoder.messageProperties2String(msg.getProperties()));
                 requestHeader.setReconsumeTimes(0);
                 requestHeader.setUnitMode(this.isUnitMode());
                 requestHeader.setBatch(msg instanceof MessageBatch);
+                //yangyc 消息重试逻辑
                 if (requestHeader.getTopic().startsWith(MixAll.RETRY_GROUP_TOPIC_PREFIX)) {
                     String reconsumeTimes = MessageAccessor.getReconsumeTime(msg);
                     if (reconsumeTimes != null) {
@@ -805,7 +836,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                     }
                 }
 
-                SendResult sendResult = null;
+                SendResult sendResult = null;//yangyc 发送结果
                 switch (communicationMode) {
                     case ASYNC:
                         Message tmpMessage = msg;
@@ -831,6 +862,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                         if (timeout < costTimeAsync) {
                             throw new RemotingTooMuchRequestException("sendKernelImpl call timeout");
                         }
+                        //yangyc-main 发送消息  -- 重点
                         sendResult = this.mQClientFactory.getMQClientAPIImpl().sendMessage(
                             brokerAddr,
                             mq.getBrokerName(),
@@ -846,11 +878,12 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                             this);
                         break;
                     case ONEWAY:
-                    case SYNC:
-                        long costTimeSync = System.currentTimeMillis() - beginStartTime;
+                    case SYNC: //yangyc 单向和同步逻辑一样
+                        long costTimeSync = System.currentTimeMillis() - beginStartTime;//yangyc 当前耗时，如果超时则抛异常
                         if (timeout < costTimeSync) {
                             throw new RemotingTooMuchRequestException("sendKernelImpl call timeout");
                         }
+                        //yangyc-main 获取API对象，调用发送方法。参数1：broker地址,参数2：brokerName,参数3：消息,参数4：SendMessageRequestHeader,参数5：剩余超时时间,参数6：发送模式,参数7：context,参数8：生产者对象
                         sendResult = this.mQClientFactory.getMQClientAPIImpl().sendMessage(
                             brokerAddr,
                             mq.getBrokerName(),
@@ -866,6 +899,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                         break;
                 }
 
+                //yangyc-main 消息发送完之后执行钩子函数
                 if (this.hasSendMessageHook()) {
                     context.setSendResult(sendResult);
                     this.executeSendMessageHookAfter(context);
@@ -1199,10 +1233,12 @@ public class DefaultMQProducerImpl implements MQProducerInner {
         }
     }
 
+    //yangyc-main 参数1：与本地事务强相关的消息  参数2：本地事务逻辑封装（可能是null） 参数3：本地事务执行依赖的参数，一般是普通的pojo
     public TransactionSendResult sendMessageInTransaction(final Message msg,
         final LocalTransactionExecuter localTransactionExecuter, final Object arg)
         throws MQClientException {
         TransactionListener transactionListener = getCheckListener();
+        //yangyc-main 检查生产者。localTransactionExecuter 和 transactionListener 不能同时为 null
         if (null == localTransactionExecuter && null == transactionListener) {
             throw new MQClientException("tranExecutor is null", null);
         }
@@ -1215,9 +1251,11 @@ public class DefaultMQProducerImpl implements MQProducerInner {
         Validators.checkMessage(msg, this.defaultMQProducer);
 
         SendResult sendResult = null;
+        //yangyc-main 消息添加属性 TRAN_MSG--true   PGROUP--生产者组名
         MessageAccessor.putProperty(msg, MessageConst.PROPERTY_TRANSACTION_PREPARED, "true");
         MessageAccessor.putProperty(msg, MessageConst.PROPERTY_PRODUCER_GROUP, this.defaultMQProducer.getProducerGroup());
         try {
+            //yangyc-main 正常发送消息流程， sendResult：发送结果
             sendResult = this.send(msg);
         } catch (Exception e) {
             throw new MQClientException("send message Exception", e);
@@ -1225,10 +1263,12 @@ public class DefaultMQProducerImpl implements MQProducerInner {
 
         LocalTransactionState localTransactionState = LocalTransactionState.UNKNOW;
         Throwable localException = null;
+        //yangyc-main 本地事务执行结果
         switch (sendResult.getSendStatus()) {
             case SEND_OK: {
                 try {
                     if (sendResult.getTransactionId() != null) {
+                        //yangyc-main 获取 msg 的 UNIQ_ID，作为事务ID, 加入到 properties 中
                         msg.putUserProperty("__transactionId__", sendResult.getTransactionId());
                     }
                     String transactionId = msg.getProperty(MessageConst.PROPERTY_UNIQ_CLIENT_MESSAGE_ID_KEYIDX);
@@ -1236,9 +1276,11 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                         msg.setTransactionId(transactionId);
                     }
                     if (null != localTransactionExecuter) {
+                        //yangyc-main 执行本地事务
                         localTransactionState = localTransactionExecuter.executeLocalTransactionBranch(msg, arg);
                     } else if (transactionListener != null) {
                         log.debug("Used new transaction API");
+                        //yangyc-main 执行本地事务
                         localTransactionState = transactionListener.executeLocalTransaction(msg, arg);
                     }
                     if (null == localTransactionState) {
@@ -1266,6 +1308,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
         }
 
         try {
+            //yangyc-main
             this.endTransaction(sendResult, localTransactionState, localException);
         } catch (Exception e) {
             log.warn("local transaction execute " + localTransactionState + ", but end broker transaction failed", e);
@@ -1284,11 +1327,13 @@ public class DefaultMQProducerImpl implements MQProducerInner {
     /**
      * DEFAULT SYNC -------------------------------------------------------
      */
+    //yangyc-main 发送消息入口
     public SendResult send(
         Message msg) throws MQClientException, RemotingException, MQBrokerException, InterruptedException {
-        return send(msg, this.defaultMQProducer.getSendMsgTimeout());
+        return send(msg, this.defaultMQProducer.getSendMsgTimeout()); //yangyc 参数1：msg. 参数2: 超时发送时间（默认3s）
     }
 
+    //yangyc-main
     public void endTransaction(
         final SendResult sendResult,
         final LocalTransactionState localTransactionState,
@@ -1301,6 +1346,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
         }
         String transactionId = sendResult.getTransactionId();
         final String brokerAddr = this.mQClientFactory.findBrokerAddressInPublish(sendResult.getMessageQueue().getBrokerName());
+        //yangyc-main 构建 EndTransactionRequestHeader 对象
         EndTransactionRequestHeader requestHeader = new EndTransactionRequestHeader();
         requestHeader.setTransactionId(transactionId);
         requestHeader.setCommitLogOffset(id.getOffset());
@@ -1322,6 +1368,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
         requestHeader.setTranStateTableOffset(sendResult.getQueueOffset());
         requestHeader.setMsgId(sendResult.getMsgId());
         String remark = localException != null ? ("executeLocalTransactionBranch exception: " + localException.toString()) : null;
+        //yangyc-main 向 broker 发起 endTransactionOneway 请求
         this.mQClientFactory.getMQClientAPIImpl().endTransactionOneway(brokerAddr, requestHeader, remark,
             this.defaultMQProducer.getSendMsgTimeout());
     }
@@ -1337,10 +1384,10 @@ public class DefaultMQProducerImpl implements MQProducerInner {
     public void setAsyncSenderExecutor(ExecutorService asyncSenderExecutor) {
         this.asyncSenderExecutor = asyncSenderExecutor;
     }
-
+    //yangyc 发送消息。 参数1：msg. 参数2: 超时发送时间（默认3s）
     public SendResult send(Message msg,
         long timeout) throws MQClientException, RemotingException, MQBrokerException, InterruptedException {
-        return this.sendDefaultImpl(msg, CommunicationMode.SYNC, null, timeout);
+        return this.sendDefaultImpl(msg, CommunicationMode.SYNC, null, timeout); //yangyc 发送消息。 参数1：msg. 参数2：发送模型-同步 参数3：回调，同步不需要，所以是null  参数4: 超时发送时间（默认3s）
     }
 
     public Message request(Message msg,

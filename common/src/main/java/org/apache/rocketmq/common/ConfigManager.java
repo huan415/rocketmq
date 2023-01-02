@@ -29,12 +29,14 @@ public abstract class ConfigManager {
     public boolean load() {
         String fileName = null;
         try {
+            //yangyc-main ”..store/config/delayOffset.json“
             fileName = this.configFilePath();
             String jsonString = MixAll.file2String(fileName);
 
             if (null == jsonString || jsonString.length() == 0) {
                 return this.loadBak();
             } else {
+                //yangyc-main 加载文件 ”..store/config/delayOffset.json“ 内容, 并初始化 offsetTable
                 this.decode(jsonString);
                 log.info("load " + fileName + " OK");
                 return true;

@@ -21,9 +21,9 @@ import io.netty.channel.ChannelHandlerContext;
 import org.apache.rocketmq.remoting.protocol.RemotingCommand;
 
 public abstract class AsyncNettyRequestProcessor implements NettyRequestProcessor {
-
+    //yangyc 名字异步,其实是同步调用, 除非子类覆盖这个方法, 例如 broker 时有覆盖这个方法
     public void asyncProcessRequest(ChannelHandlerContext ctx, RemotingCommand request, RemotingResponseCallback responseCallback) throws Exception {
         RemotingCommand response = processRequest(ctx, request);
-        responseCallback.callback(response);
+        responseCallback.callback(response); //yangyc 进入到响应客户端的逻辑入口
     }
 }

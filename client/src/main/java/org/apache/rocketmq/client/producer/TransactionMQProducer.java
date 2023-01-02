@@ -23,13 +23,17 @@ import org.apache.rocketmq.common.protocol.NamespaceUtil;
 import org.apache.rocketmq.remoting.RPCHook;
 
 public class TransactionMQProducer extends DefaultMQProducer {
+    //yangyc-main 事务监听器（不推荐使用，已过期）
     private TransactionCheckListener transactionCheckListener;
+    //yangyc-main 事务回查线程资源配置
     private int checkThreadPoolMinSize = 1;
     private int checkThreadPoolMaxSize = 1;
     private int checkRequestHoldMax = 2000;
 
+    //yangyc-main 事务回查线程资源，一般是 null
     private ExecutorService executorService;
 
+    //yangyc-main 事务监听器（推荐使用）
     private TransactionListener transactionListener;
 
     public TransactionMQProducer() {
@@ -51,9 +55,12 @@ public class TransactionMQProducer extends DefaultMQProducer {
         super(namespace, producerGroup, rpcHook);
     }
 
+    //yangyc-main 启动生产者
     @Override
     public void start() throws MQClientException {
+        //yangyc-main 初始化生产者实例（defaultMQProducerImpl）的事务回查线程资源
         this.defaultMQProducerImpl.initTransactionEnv();
+        //yangyc-main 正常启动生产者实例（defaultMQProducerImpl）
         super.start();
     }
 
@@ -67,6 +74,7 @@ public class TransactionMQProducer extends DefaultMQProducer {
      * This method will be removed in the version 5.0.0, method <code>sendMessageInTransaction(Message,Object)</code>}
      * is recommended.
      */
+    //yangyc-main 发送事务消息接口1（不推荐）
     @Override
     @Deprecated
     public TransactionSendResult sendMessageInTransaction(final Message msg,
@@ -76,9 +84,11 @@ public class TransactionMQProducer extends DefaultMQProducer {
         }
 
         msg.setTopic(NamespaceUtil.wrapNamespace(this.getNamespace(), msg.getTopic()));
+        //yangyc-main 依赖 defaultMQProducerImpl#sendMessageInTransaction 方法实现
         return this.defaultMQProducerImpl.sendMessageInTransaction(msg, tranExecuter, arg);
     }
 
+    //yangyc-main 发送事务消息接口2（推荐）
     @Override
     public TransactionSendResult sendMessageInTransaction(final Message msg,
         final Object arg) throws MQClientException {
@@ -87,6 +97,7 @@ public class TransactionMQProducer extends DefaultMQProducer {
         }
 
         msg.setTopic(NamespaceUtil.wrapNamespace(this.getNamespace(), msg.getTopic()));
+        //yangyc-main 依赖 defaultMQProducerImpl#sendMessageInTransaction 方法实现
         return this.defaultMQProducerImpl.sendMessageInTransaction(msg, null, arg);
     }
 

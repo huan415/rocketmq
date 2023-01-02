@@ -26,9 +26,9 @@ import org.apache.rocketmq.common.protocol.route.TopicRouteData;
 public class TopicPublishInfo {
     private boolean orderTopic = false;
     private boolean haveTopicRouterInfo = false;
-    private List<MessageQueue> messageQueueList = new ArrayList<MessageQueue>();
+    private List<MessageQueue> messageQueueList = new ArrayList<MessageQueue>(); //yangyc 主题全部的队列
     private volatile ThreadLocalIndex sendWhichQueue = new ThreadLocalIndex();
-    private TopicRouteData topicRouteData;
+    private TopicRouteData topicRouteData; //yangyc 主题路由数据
 
     public boolean isOrderTopic() {
         return orderTopic;
@@ -66,7 +66,7 @@ public class TopicPublishInfo {
         this.haveTopicRouterInfo = haveTopicRouterInfo;
     }
 
-    public MessageQueue selectOneMessageQueue(final String lastBrokerName) {
+    public MessageQueue selectOneMessageQueue(final String lastBrokerName) {//yangyc 默认选择队列的方法，返回值：当前主题下的一个队列   参数：上一次失败的brokerName(第一次是null)
         if (lastBrokerName == null) {
             return selectOneMessageQueue();
         } else {

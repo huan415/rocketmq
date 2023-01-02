@@ -65,11 +65,13 @@ public class SendMessageProcessor extends AbstractSendMessageProcessor implement
         super(brokerController);
     }
 
+    //yangyc-main 处理请求, 返回 RemotingCommand
     @Override
     public RemotingCommand processRequest(ChannelHandlerContext ctx,
                                           RemotingCommand request) throws RemotingCommandException {
         RemotingCommand response = null;
         try {
+            //yangyc-main 根据 request 请求协议
             response = asyncProcessRequest(ctx, request).get();
         } catch (InterruptedException | ExecutionException e) {
             log.error("process SendMessage error, request : " + request.toString(), e);
@@ -87,8 +89,10 @@ public class SendMessageProcessor extends AbstractSendMessageProcessor implement
         final SendMessageContext mqtraceContext;
         switch (request.getCode()) {
             case RequestCode.CONSUMER_SEND_MSG_BACK:
+                //yangyc 报告消费失败(一段时间后重试) (Deprecated)
                 return this.asyncConsumerSendMsgBack(ctx, request);
             default:
+                //yangyc-main 从请求 request 中解析出 SendMessageRequestHeader 对象
                 SendMessageRequestHeader requestHeader = parseRequestHeader(request);
                 if (requestHeader == null) {
                     return CompletableFuture.completedFuture(null);
@@ -109,9 +113,13 @@ public class SendMessageProcessor extends AbstractSendMessageProcessor implement
             this.brokerController.getMessageStore().isTransientStorePoolDeficient();
     }
 
+    //yangyc-main 处理 ”消息回退“ 协议请求
+    //yangyc 参数1：nettyChannel 上下文；参数2：客户端请求对象（RemotingCommand）；
     private CompletableFuture<RemotingCommand> asyncConsumerSendMsgBack(ChannelHandlerContext ctx,
                                                                         RemotingCommand request) throws RemotingCommandException {
+        //yangyc-main 创建服务器响应对象（response）,注意该 response 内部的 header 为null
         final RemotingCommand response = RemotingCommand.createResponseCommand(null);
+        //yangyc-main 解析出客户端请求头对象
         final ConsumerSendMsgBackRequestHeader requestHeader =
                 (ConsumerSendMsgBackRequestHeader)request.decodeCommandCustomHeader(ConsumerSendMsgBackRequestHeader.class);
         String namespace = NamespaceUtil.getNamespaceFromResource(requestHeader.getGroup());
@@ -119,33 +127,38 @@ public class SendMessageProcessor extends AbstractSendMessageProcessor implement
             ConsumeMessageContext context = buildConsumeMessageContext(namespace, requestHeader, request);
             this.executeConsumeMessageHookAfter(context);
         }
+        //yangyc 获取消费者组的配置信息
         SubscriptionGroupConfig subscriptionGroupConfig =
             this.brokerController.getSubscriptionGroupManager().findSubscriptionGroupConfig(requestHeader.getGroup());
         if (null == subscriptionGroupConfig) {
+            //yangyc 返回客户端未找到订阅者配置状态码
             response.setCode(ResponseCode.SUBSCRIPTION_GROUP_NOT_EXIST);
             response.setRemark("subscription group not exist, " + requestHeader.getGroup() + " "
                 + FAQUrl.suggestTodo(FAQUrl.SUBSCRIPTION_GROUP_NOT_EXIST));
             return CompletableFuture.completedFuture(response);
         }
         if (!PermName.isWriteable(this.brokerController.getBrokerConfig().getBrokerPermission())) {
+            //yangyc 条件成立：说明该 broker 不支持写请求，直接返回客户端 NO_PRESSION
             response.setCode(ResponseCode.NO_PERMISSION);
             response.setRemark("the broker[" + this.brokerController.getBrokerConfig().getBrokerIP1() + "] sending message is forbidden");
             return CompletableFuture.completedFuture(response);
         }
 
         if (subscriptionGroupConfig.getRetryQueueNums() <= 0) {
-            response.setCode(ResponseCode.SUCCESS);
+            //yangyc 条件成立：说明该订阅者配置的信息为：该组不支持消息重试
+            response.setCode(ResponseCode.SUCCESS); //yangyc 直接返回 success
             response.setRemark(null);
             return CompletableFuture.completedFuture(response);
         }
-
+        //yangyc-main 根据 ”消费者组“ 生成该消费者组的 ”重试主题“ 获取消费者组的重试主题。规则：%RETRY%GroupName
         String newTopic = MixAll.getRetryTopic(requestHeader.getGroup());
+        //yangyc-main 计算重试主题下的 queueId，这里计算出来的值一般都是 0 （重试主题默认就一个队列）
         int queueIdInt = Math.abs(this.random.nextInt() % 99999999) % subscriptionGroupConfig.getRetryQueueNums();
         int topicSysFlag = 0;
         if (requestHeader.isUnitMode()) {
             topicSysFlag = TopicSysFlag.buildSysFlag(false, true);
         }
-
+        //yangyc 获取“重试主题”配置信息。这一步获取出来的主题配置，队列数为：1
         TopicConfig topicConfig = this.brokerController.getTopicConfigManager().createTopicInSendMessageBackMethod(
             newTopic,
             subscriptionGroupConfig.getRetryQueueNums(),
@@ -161,31 +174,38 @@ public class SendMessageProcessor extends AbstractSendMessageProcessor implement
             response.setRemark(String.format("the topic[%s] sending message is forbidden", newTopic));
             return CompletableFuture.completedFuture(response);
         }
+        //yangyc-main 从存储模块（messageStore）根据 消息的物理offset 查出该消息（待重试消费）。内部：先查询出这条消息的size, 再根据 offset 和 size 查询出整条 msg
         MessageExt msgExt = this.brokerController.getMessageStore().lookMessageByOffset(requestHeader.getOffset());
         if (null == msgExt) {
+            //yangyc 未查询到“需要回退处理”的消息，返回系统错误
             response.setCode(ResponseCode.SYSTEM_ERROR);
             response.setRemark("look message by offset failed, " + requestHeader.getOffset());
             return CompletableFuture.completedFuture(response);
         }
-
+        //yangyc-main 获取”原始消息“的主题 (可能是null, 也可能是原始消息主题)
         final String retryTopic = msgExt.getProperty(MessageConst.PROPERTY_RETRY_TOPIC);
-        if (null == retryTopic) {
+        if (null == retryTopic) { //yangyc-main CASE1: 条件成立：说明 offset 这条消息是第一次被回退
+            //yangyc-main 添加 “RETRY_TOPIC” 属性，值为 “消息的主题”
             MessageAccessor.putProperty(msgExt, MessageConst.PROPERTY_RETRY_TOPIC, msgExt.getTopic());
         }
+        //yangyc 设置刷盘状态为“异步”
         msgExt.setWaitStoreMsgOK(false);
-
+        //yangyc 延迟级别（一般是 0）
         int delayLevel = requestHeader.getDelayLevel();
-
+        //yangyc 获取订阅组 配置信息中 最大重试次数，一般是 16
         int maxReconsumeTimes = subscriptionGroupConfig.getRetryMaxTimes();
         if (request.getVersion() >= MQVersion.Version.V3_4_9.ordinal()) {
+            //yangyc 客户端从 3.4.9 版本之后，支持客户端控制“最大延迟级别”，这里一般也是16
             maxReconsumeTimes = requestHeader.getMaxReconsumeTimes();
         }
-
+        //yangyc 条件成立：说明消息不支持再重试了，需要将该消息转入到 “死信” 主题
         if (msgExt.getReconsumeTimes() >= maxReconsumeTimes 
-            || delayLevel < 0) {
+            || delayLevel < 0) { //yangyc-main CASE1: 请求头 delayLevel<0 || message消息重试次数>=16.重试主题修改为私信队列主题，规则：%DLQ%GroupName
+            //yangyc 获取消费者主的死信主题，规则：“%DLQ%”GroupName
             newTopic = MixAll.getDLQTopic(requestHeader.getGroup());
+            //yangyc 死信主题队列ID: 0
             queueIdInt = Math.abs(this.random.nextInt() % 99999999) % DLQ_NUMS_PER_GROUP;
-
+            //yangyc 死信主题配置
             topicConfig = this.brokerController.getTopicConfigManager().createTopicInSendMessageBackMethod(newTopic,
                     DLQ_NUMS_PER_GROUP,
                     PermName.PERM_WRITE, 0);
@@ -194,30 +214,36 @@ public class SendMessageProcessor extends AbstractSendMessageProcessor implement
                 response.setRemark("topic[" + newTopic + "] not exist");
                 return CompletableFuture.completedFuture(response);
             }
-        } else {
-            if (0 == delayLevel) {
+        } else { //yangyc-main CASE2: 正常情况
+            if (0 == delayLevel) { //yangyc 条件成立：说明延迟级别由 broker 端控制
+                //yangyc-main 计算延迟级别：延迟级别从 3 开始，每重试一次，延迟级别 +1
                 delayLevel = 3 + msgExt.getReconsumeTimes();
             }
+            //yangyc-main 将延迟级别设置到消息属性，KEY:"DELAY".  存储时，会检查该属性，该属性 >0 的话，会将消息主题和队列再次修改，修改为调度主题 和 调度队列ID
             msgExt.setDelayTimeLevel(delayLevel);
         }
-
+        //yangyc-main 创建一条空消息，消息数据从上面这条消息拷贝
         MessageExtBrokerInner msgInner = new MessageExtBrokerInner();
-        msgInner.setTopic(newTopic);
+        msgInner.setTopic(newTopic); //yangyc 主题为 “重试主题” 或者 “死信主题”
+        //yangyc 下面字段都是从 offset 查询出来的 msg 中拷贝过来的
         msgInner.setBody(msgExt.getBody());
         msgInner.setFlag(msgExt.getFlag());
         MessageAccessor.setProperties(msgInner, msgExt.getProperties());
         msgInner.setPropertiesString(MessageDecoder.messageProperties2String(msgExt.getProperties()));
         msgInner.setTagsCode(MessageExtBrokerInner.tagsString2tagsCode(null, msgExt.getTags()));
 
-        msgInner.setQueueId(queueIdInt);
+        msgInner.setQueueId(queueIdInt); //yangyc queueId 为 “重试主题”的queueId 或者 “死信主题”的queueId
         msgInner.setSysFlag(msgExt.getSysFlag());
         msgInner.setBornTimestamp(msgExt.getBornTimestamp());
         msgInner.setBornHost(msgExt.getBornHost());
         msgInner.setStoreHost(msgExt.getStoreHost());
-        msgInner.setReconsumeTimes(msgExt.getReconsumeTimes() + 1);
+        msgInner.setReconsumeTimes(msgExt.getReconsumeTimes() + 1); //yangyc 重试次数+1
 
-        String originMsgId = MessageAccessor.getOriginMessageId(msgExt);
+        String originMsgId = MessageAccessor.getOriginMessageId(msgExt); //yangyc 获取出最原始 msg 的消息Id
+        //yangyc UtilAll.isBlank(originMsgId)==true: 说明 msgExt 这条消息是第一次被返回到服务器，此时使用该 msg 的 id 做为 originMessageId
+        // UtilAll.isBlank(originMsgId)==true: 说明“原始消息已经被重试不止1次了”，此时使用该 msg 的 id 做为 originMessageId .
         MessageAccessor.setOriginMessageId(msgInner, UtilAll.isBlank(originMsgId) ? msgExt.getMsgId() : originMsgId);
+        //yangyc-main 调用存储模块的存储消息方法, 将 ”新消息“ 存储到 commitLog 文件
         CompletableFuture<PutMessageResult> putMessageResult = this.brokerController.getMessageStore().asyncPutMessage(msgInner);
         return putMessageResult.thenApply((r) -> {
             if (r != null) {
@@ -250,12 +276,14 @@ public class SendMessageProcessor extends AbstractSendMessageProcessor implement
                                                                 SendMessageContext mqtraceContext,
                                                                 SendMessageRequestHeader requestHeader) {
         final RemotingCommand response = preSend(ctx, request, requestHeader);
+        //yangyc-main 创建响应对象，设置 opaque 为 request#opaque, 注意此时 responseHeader 字段都是 null
         final SendMessageResponseHeader responseHeader = (SendMessageResponseHeader)response.readCustomHeader();
 
         if (response.getCode() != -1) {
             return CompletableFuture.completedFuture(response);
         }
 
+        //yangyc-main 从请求 request 中读取消息体 body
         final byte[] body = request.getBody();
 
         int queueIdInt = requestHeader.getQueueId();
@@ -265,6 +293,7 @@ public class SendMessageProcessor extends AbstractSendMessageProcessor implement
             queueIdInt = randomQueueId(topicConfig.getWriteQueueNums());
         }
 
+        //yangyc-main 根据已读数据创建 msgInner 对象
         MessageExtBrokerInner msgInner = new MessageExtBrokerInner();
         msgInner.setTopic(requestHeader.getTopic());
         msgInner.setQueueId(queueIdInt);
@@ -287,8 +316,10 @@ public class SendMessageProcessor extends AbstractSendMessageProcessor implement
 
         CompletableFuture<PutMessageResult> putMessageResult = null;
         Map<String, String> origProps = MessageDecoder.string2messageProperties(requestHeader.getProperties());
+        //yangyc-main 获取 msgInner#properties 中的 TRAN_MSG 属性值
         String transFlag = origProps.get(MessageConst.PROPERTY_TRANSACTION_PREPARED);
         if (transFlag != null && Boolean.parseBoolean(transFlag)) {
+            //yangyc-main 如果 transFlag==true, 则走事务消息存储逻辑 (存储主模块)
             if (this.brokerController.getBrokerConfig().isRejectTransactionMessage()) {
                 response.setCode(ResponseCode.NO_PERMISSION);
                 response.setRemark(
@@ -298,8 +329,10 @@ public class SendMessageProcessor extends AbstractSendMessageProcessor implement
             }
             putMessageResult = this.brokerController.getTransactionalMessageService().asyncPrepareMessage(msgInner);
         } else {
+            //yangyc-main 如果 transFlag==false, 则走普通消息存储逻辑 (存储主模块)
             putMessageResult = this.brokerController.getMessageStore().asyncPutMessage(msgInner);
         }
+        //yangyc-main 根据 putMessageResult 填充 SendMessageRequestHeader, 并返回 RemotingCommand
         return handlePutMessageResultFuture(putMessageResult, response, request, msgInner, responseHeader, mqtraceContext, ctx, queueIdInt);
     }
 

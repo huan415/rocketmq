@@ -50,10 +50,12 @@ public class EndTransactionProcessor extends AsyncNettyRequestProcessor implemen
         this.brokerController = brokerController;
     }
 
+    //yangyc-main 处理消息, 返回 RemotingCommand
     @Override
     public RemotingCommand processRequest(ChannelHandlerContext ctx, RemotingCommand request) throws
         RemotingCommandException {
         final RemotingCommand response = RemotingCommand.createResponseCommand(null);
+        //yangyc-main 从请求 request 中解析出 EndTransactionRequestHeader 对象
         final EndTransactionRequestHeader requestHeader =
             (EndTransactionRequestHeader)request.decodeCommandCustomHeader(EndTransactionRequestHeader.class);
         LOGGER.debug("Transaction request:{}", requestHeader);
@@ -124,8 +126,10 @@ public class EndTransactionProcessor extends AsyncNettyRequestProcessor implemen
         }
         OperationResult result = new OperationResult();
         if (MessageSysFlag.TRANSACTION_COMMIT_TYPE == requestHeader.getCommitOrRollback()) {
+            //yangyc-main 根据 commitLogOffset 提取出 halfMsg 消息 (halfMsg 放在 result#prepareMessage 中)
             result = this.brokerController.getTransactionalMessageService().commitMessage(requestHeader);
             if (result.getResponseCode() == ResponseCode.SUCCESS) {
+                //yangyc-main 根据 halfMsg 克隆一条新消息（newMsg），修改 newMsg 的 topic 和 queueId 为 halfMsg->properties(realTopic:"xx", realQueueId:"xx")
                 RemotingCommand res = checkPrepareMessage(result.getPrepareMessage(), requestHeader);
                 if (res.getCode() == ResponseCode.SUCCESS) {
                     MessageExtBrokerInner msgInner = endMessageTransaction(result.getPrepareMessage());
@@ -133,9 +137,12 @@ public class EndTransactionProcessor extends AsyncNettyRequestProcessor implemen
                     msgInner.setQueueOffset(requestHeader.getTranStateTableOffset());
                     msgInner.setPreparedTransactionOffset(requestHeader.getCommitLogOffset());
                     msgInner.setStoreTimestamp(result.getPrepareMessage().getStoreTimestamp());
+                    //yangyc-main 清理掉 newMsg#properties 中的 TRAN_MSG、REAL_TOPIC、REAL_QUEUEID 等配置
                     MessageAccessor.clearProperty(msgInner, MessageConst.PROPERTY_TRANSACTION_PREPARED);
+                    //yangyc-main 保存 newMsg 到存储模块（至此, 消费者就有机会拿到本条消息了）
                     RemotingCommand sendResult = sendFinalMessage(msgInner);
                     if (sendResult.getCode() == ResponseCode.SUCCESS) {
+                        //yangyc-main 向 “操作队列” 添加一条消息，消息体数据为：halfMsg 的 queueOffset, 表示半消息队列指定的 offset 消息已删除
                         this.brokerController.getTransactionalMessageService().deletePrepareMessage(result.getPrepareMessage());
                     }
                     return sendResult;

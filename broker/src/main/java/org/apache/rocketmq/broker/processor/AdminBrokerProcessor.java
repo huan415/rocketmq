@@ -151,88 +151,130 @@ public class AdminBrokerProcessor extends AsyncNettyRequestProcessor implements 
         RemotingCommand request) throws RemotingCommandException {
         switch (request.getCode()) {
             case RequestCode.UPDATE_AND_CREATE_TOPIC:
+                //yangyc 创建或更新Topic
                 return this.updateAndCreateTopic(ctx, request);
             case RequestCode.DELETE_TOPIC_IN_BROKER:
+                //yangyc 删除 Broker 中的 Topic
                 return this.deleteTopic(ctx, request);
             case RequestCode.GET_ALL_TOPIC_CONFIG:
+                //yangyc 获取所有的Topic信息
                 return this.getAllTopicConfig(ctx, request);
             case RequestCode.UPDATE_BROKER_CONFIG:
+                //yangyc 更新 Broker 配置
                 return this.updateBrokerConfig(ctx, request);
             case RequestCode.GET_BROKER_CONFIG:
+                //yangyc 获取 Broker 配置
                 return this.getBrokerConfig(ctx, request);
             case RequestCode.SEARCH_OFFSET_BY_TIMESTAMP:
+                //yangyc 通过时间戳查找偏移量
                 return this.searchOffsetByTimestamp(ctx, request);
             case RequestCode.GET_MAX_OFFSET:
+                //yangyc 获取最大偏移量
                 return this.getMaxOffset(ctx, request);
             case RequestCode.GET_MIN_OFFSET:
+                //yangyc 获取最小偏移量
                 return this.getMinOffset(ctx, request);
             case RequestCode.GET_EARLIEST_MSG_STORETIME:
+                //yangyc 获取最早的存储消息时间
                 return this.getEarliestMsgStoretime(ctx, request);
             case RequestCode.GET_BROKER_RUNTIME_INFO:
+                //yangyc 获取 Broker 运行时信息
                 return this.getBrokerRuntimeInfo(ctx, request);
             case RequestCode.LOCK_BATCH_MQ:
+                //yangyc 批量锁定 Queue (rebalance使用)
                 return this.lockBatchMQ(ctx, request);
             case RequestCode.UNLOCK_BATCH_MQ:
+                //yangyc 批量解锁 Queue
                 return this.unlockBatchMQ(ctx, request);
             case RequestCode.UPDATE_AND_CREATE_SUBSCRIPTIONGROUP:
+                //yangyc 更新或创建订阅组
                 return this.updateAndCreateSubscriptionGroup(ctx, request);
             case RequestCode.GET_ALL_SUBSCRIPTIONGROUP_CONFIG:
+                //yangyc 获取所有订阅组的配置
                 return this.getAllSubscriptionGroup(ctx, request);
             case RequestCode.DELETE_SUBSCRIPTIONGROUP:
+                //yangyc 删除订阅组
                 return this.deleteSubscriptionGroup(ctx, request);
             case RequestCode.GET_TOPIC_STATS_INFO:
+                //yangyc 获取消费者的度量指标
                 return this.getTopicStatsInfo(ctx, request);
             case RequestCode.GET_CONSUMER_CONNECTION_LIST:
+                //yangyc 获取消费者在线列表(rpc)
                 return this.getConsumerConnectionList(ctx, request);
             case RequestCode.GET_PRODUCER_CONNECTION_LIST:
+                //yangyc 获取生产者在线列表
                 return this.getProducerConnectionList(ctx, request);
             case RequestCode.GET_CONSUME_STATS:
+                //yangyc 获取消费者的度量指标
                 return this.getConsumeStats(ctx, request);
             case RequestCode.GET_ALL_CONSUMER_OFFSET:
+                //yangyc 获得该 Broker 上的所有的消费者偏移量（BrokerOuterAPI 请求过来的）
                 return this.getAllConsumerOffset(ctx, request);
             case RequestCode.GET_ALL_DELAY_OFFSET:
+                //yangyc 获得延迟 Topic 上的偏移量（BrokerOuterAPI 请求过来的）
                 return this.getAllDelayOffset(ctx, request);
             case RequestCode.INVOKE_BROKER_TO_RESET_OFFSET:
+                //yangyc 让 Broker 重置消费进度
                 return this.resetOffset(ctx, request);
             case RequestCode.INVOKE_BROKER_TO_GET_CONSUMER_STATUS:
+                //yangyc 让 Broker 更新消费者的度量信息
                 return this.getConsumerStatus(ctx, request);
             case RequestCode.QUERY_TOPIC_CONSUME_BY_WHO:
+                //yangyc 查询消息被谁消费
                 return this.queryTopicConsumeByWho(ctx, request);
             case RequestCode.REGISTER_FILTER_SERVER:
+                //yangyc 注册过滤器服务器（还没有找到哪里请求过来的）
                 return this.registerFilterServer(ctx, request);
             case RequestCode.QUERY_CONSUME_TIME_SPAN:
+                //yangyc 查询消费时间
                 return this.queryConsumeTimeSpan(ctx, request);
             case RequestCode.GET_SYSTEM_TOPIC_LIST_FROM_BROKER:
+                //yangyc 从 Broker 中获取系统Topic
                 return this.getSystemTopicListFromBroker(ctx, request);
             case RequestCode.CLEAN_EXPIRED_CONSUMEQUEUE:
+                //yangyc 清理过期的消费队列
                 return this.cleanExpiredConsumeQueue();
             case RequestCode.CLEAN_UNUSED_TOPIC:
+                //yangyc 清理未使用的 Topic
                 return this.cleanUnusedTopic();
             case RequestCode.GET_CONSUMER_RUNNING_INFO:
+                //yangyc 获取 Consumer 的运行时信息
                 return this.getConsumerRunningInfo(ctx, request);
             case RequestCode.QUERY_CORRECTION_OFFSET:
+                //yangyc 查询修正偏移量
                 return this.queryCorrectionOffset(ctx, request);
             case RequestCode.CONSUME_MESSAGE_DIRECTLY:
+                //yangyc 直接消费消息
                 return this.consumeMessageDirectly(ctx, request);
             case RequestCode.CLONE_GROUP_OFFSET:
+                //yangyc 克隆消费进度
                 return this.cloneGroupOffset(ctx, request);
             case RequestCode.VIEW_BROKER_STATS_DATA:
+                //yangyc 查询 Broker 上的度量信息
                 return ViewBrokerStatsData(ctx, request);
             case RequestCode.GET_BROKER_CONSUME_STATS:
+                //yangyc 获取 broker 上的有关消费的度量信息
                 return fetchAllConsumeStatsInBroker(ctx, request);
             case RequestCode.QUERY_CONSUME_QUEUE:
+                //yangyc 查询消费的 Queue
                 return queryConsumeQueue(ctx, request);
             case RequestCode.UPDATE_AND_CREATE_ACL_CONFIG:
+                //yangyc 更新或创建 ACL
                 return updateAndCreateAccessConfig(ctx, request);
             case RequestCode.DELETE_ACL_CONFIG:
+                //yangyc 删除 ACL 配置
                 return deleteAccessConfig(ctx, request);
             case RequestCode.GET_BROKER_CLUSTER_ACL_INFO:
+                //yangyc 获取 Broker 集群的 ACL 信息
                 return getBrokerAclConfigVersion(ctx, request);
             case RequestCode.UPDATE_GLOBAL_WHITE_ADDRS_CONFIG:
+                //yangyc 更新全局白名单
                 return updateGlobalWhiteAddrsConfig(ctx, request);
             case RequestCode.RESUME_CHECK_HALF_MESSAGE:
+                //yangyc 检查半消息
                 return resumeCheckHalfMessage(ctx, request);
             case RequestCode.GET_BROKER_CLUSTER_ACL_CONFIG:
+                //yangyc 获取 Broker 集群的 ACL 配置
                 return getBrokerClusterAclConfig(ctx, request);
             default:
                 break;

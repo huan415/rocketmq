@@ -28,11 +28,13 @@ public interface MQPushConsumer extends MQConsumer {
     /**
      * Start the consumer
      */
+    //yangyc-main 启动消费者
     void start() throws MQClientException;
 
     /**
      * Shutdown the consumer
      */
+    //yangyc-main 关闭消费者
     void shutdown();
 
     /**
@@ -41,6 +43,7 @@ public interface MQPushConsumer extends MQConsumer {
     @Deprecated
     void registerMessageListener(MessageListener messageListener);
 
+    //yangyc-main 注册消息监听器处理对象
     void registerMessageListener(final MessageListenerConcurrently messageListener);
 
     void registerMessageListener(final MessageListenerOrderly messageListener);
@@ -52,6 +55,7 @@ public interface MQPushConsumer extends MQConsumer {
      * null or * expression,meaning subscribe
      * all
      */
+    //yangyc-main 添加订阅信息
     void subscribe(final String topic, final String subExpression) throws MQClientException;
 
     /**
@@ -91,6 +95,7 @@ public interface MQPushConsumer extends MQConsumer {
      *
      * @param topic message topic
      */
+    //yangyc-main 删除指定主题的订阅信息, 即: 不再消费该主题
     void unsubscribe(final String topic);
 
     /**
@@ -101,10 +106,12 @@ public interface MQPushConsumer extends MQConsumer {
     /**
      * Suspend the consumption
      */
+    //yangyc-main 停止消费
     void suspend();
 
     /**
      * Resume the consumption
      */
+    //yangyc-main 恢复消费
     void resume();
 }

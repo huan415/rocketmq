@@ -20,23 +20,23 @@ public class NettyClientConfig {
     /**
      * Worker thread number
      */
-    private int clientWorkerThreads = 4;
-    private int clientCallbackExecutorThreads = Runtime.getRuntime().availableProcessors();
-    private int clientOnewaySemaphoreValue = NettySystemConfig.CLIENT_ONEWAY_SEMAPHORE_VALUE;
-    private int clientAsyncSemaphoreValue = NettySystemConfig.CLIENT_ASYNC_SEMAPHORE_VALUE;
-    private int connectTimeoutMillis = 3000;
-    private long channelNotActiveInterval = 1000 * 60;
+    private int clientWorkerThreads = 4; //yangyc 客户端工作线程数
+    private int clientCallbackExecutorThreads = Runtime.getRuntime().availableProcessors(); //yangyc 客户端回调处理线程池，平台核心数
+    private int clientOnewaySemaphoreValue = NettySystemConfig.CLIENT_ONEWAY_SEMAPHORE_VALUE; //yangyc 单向请求并发限制：65535
+    private int clientAsyncSemaphoreValue = NettySystemConfig.CLIENT_ASYNC_SEMAPHORE_VALUE; //yangyc 异步单向请求并发限制：65535
+    private int connectTimeoutMillis = 3000; //yangyc 客户端连接服务器超时时间限制：3s
+    private long channelNotActiveInterval = 1000 * 60; //yangyc 客户端未激活周期：60s（指定时间内 ch 未激活, 需要关闭）
 
     /**
      * IdleStateEvent will be triggered when neither read nor write was performed for
      * the specified period of this time. Specify {@code 0} to disable
      */
-    private int clientChannelMaxIdleTimeSeconds = 120;
+    private int clientChannelMaxIdleTimeSeconds = 120; //yangyc 客户端与服务端的ch, 最大空闲时间：2min
 
-    private int clientSocketSndBufSize = NettySystemConfig.socketSndbufSize;
-    private int clientSocketRcvBufSize = NettySystemConfig.socketRcvbufSize;
-    private boolean clientPooledByteBufAllocatorEnable = false;
-    private boolean clientCloseSocketIfTimeout = false;
+    private int clientSocketSndBufSize = NettySystemConfig.socketSndbufSize; //yangyc socket 写缓冲区大小：65535
+    private int clientSocketRcvBufSize = NettySystemConfig.socketRcvbufSize; //yangyc socket 读缓冲区大小：65535
+    private boolean clientPooledByteBufAllocatorEnable = false; //yangyc 客户端 netty 是否启用内存池
+    private boolean clientCloseSocketIfTimeout = false; //yangyc 客户端超时之后是否关闭
 
     private boolean useTLS;
 

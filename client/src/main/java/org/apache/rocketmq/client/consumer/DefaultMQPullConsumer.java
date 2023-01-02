@@ -41,12 +41,13 @@ import org.apache.rocketmq.remoting.exception.RemotingException;
  */
 @Deprecated
 public class DefaultMQPullConsumer extends ClientConfig implements MQPullConsumer {
-
+    //yangyc 消费者实现对象
     protected final transient DefaultMQPullConsumerImpl defaultMQPullConsumerImpl;
 
     /**
      * Do the same thing for the same Group, the application must be set,and guarantee Globally unique
      */
+    //yangyc 消费者组名
     private String consumerGroup;
     /**
      * Long polling mode, the Consumer connection max suspend time, it is not recommended to modify
@@ -64,6 +65,7 @@ public class DefaultMQPullConsumer extends ClientConfig implements MQPullConsume
     /**
      * Consumption pattern,default is clustering
      */
+    //yangyc 消费模式：集群模式、广播默认。默认：集群模式
     private MessageModel messageModel = MessageModel.CLUSTERING;
     /**
      * Message queue listener

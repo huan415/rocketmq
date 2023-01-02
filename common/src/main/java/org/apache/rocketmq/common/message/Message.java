@@ -27,6 +27,7 @@ public class Message implements Serializable {
 
     private String topic;
     private int flag;
+    //yangyc-main UNIQ_KEY、GROUP 这两个事务消息时需要使用
     private Map<String, String> properties;
     private byte[] body;
     private String transactionId;

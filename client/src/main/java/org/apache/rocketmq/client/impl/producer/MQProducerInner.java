@@ -23,9 +23,9 @@ import org.apache.rocketmq.common.message.MessageExt;
 import org.apache.rocketmq.common.protocol.header.CheckTransactionStateRequestHeader;
 
 public interface MQProducerInner {
-    Set<String> getPublishTopicList();
+    Set<String> getPublishTopicList(); //yangyc 获取生产者关都有哪些 topic 发布信息
 
-    boolean isPublishTopicNeedUpdate(final String topic);
+    boolean isPublishTopicNeedUpdate(final String topic); //yangyc 判断指定 topic 是否需要更新主题发布信息
 
     TransactionCheckListener checkListener();
     TransactionListener getCheckListener();
@@ -35,7 +35,7 @@ public interface MQProducerInner {
         final MessageExt msg,
         final CheckTransactionStateRequestHeader checkRequestHeader);
 
-    void updateTopicPublishInfo(final String topic, final TopicPublishInfo info);
+    void updateTopicPublishInfo(final String topic, final TopicPublishInfo info); //yangyc 更新指定主题的发布信息
 
     boolean isUnitMode();
 }

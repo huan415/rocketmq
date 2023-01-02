@@ -24,24 +24,32 @@ import org.apache.rocketmq.remoting.CommandCustomHeader;
 import org.apache.rocketmq.remoting.annotation.CFNotNull;
 import org.apache.rocketmq.remoting.annotation.CFNullable;
 import org.apache.rocketmq.remoting.exception.RemotingCommandException;
-
+//yangyc 包装 pull 请求所有的业务层面的参数
 public class PullMessageRequestHeader implements CommandCustomHeader {
+    //yangyc-main 消费者组
     @CFNotNull
     private String consumerGroup;
+    //yangyc-main 主题
     @CFNotNull
     private String topic;
+    //yangyc-main 队列id
     @CFNotNull
     private Integer queueId;
+    //yangyc-main 拉消息开始 offset
     @CFNotNull
     private Long queueOffset;
+    //yangyc-main 本次拉取消息数量最大值
     @CFNotNull
     private Integer maxMsgNums;
     @CFNotNull
     private Integer sysFlag;
+    //yangyc-main 消费者消费进度 offset
     @CFNotNull
     private Long commitOffset;
+    //yangyc-main 服务端长轮询最大时长
     @CFNotNull
     private Long suspendTimeoutMillis;
+    //yangyc-main 订阅信息, 一般是 null
     @CFNullable
     private String subscription;
     @CFNotNull

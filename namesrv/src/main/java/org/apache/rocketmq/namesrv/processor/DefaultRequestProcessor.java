@@ -81,47 +81,66 @@ public class DefaultRequestProcessor extends AsyncNettyRequestProcessor implemen
 
         switch (request.getCode()) {
             case RequestCode.PUT_KV_CONFIG:
+                //yangyc 放入KV键值配置
                 return this.putKVConfig(ctx, request);
             case RequestCode.GET_KV_CONFIG:
+                //yangyc 获取键值配置
                 return this.getKVConfig(ctx, request);
             case RequestCode.DELETE_KV_CONFIG:
+                //yangyc 删除键值配置
                 return this.deleteKVConfig(ctx, request);
             case RequestCode.QUERY_DATA_VERSION:
+                //yangyc 查询数据版本  (BrokerOuterAPI 发起调用的)
                 return queryBrokerTopicConfig(ctx, request);
             case RequestCode.REGISTER_BROKER:
+                //yangyc 注册 Broker  (BrokerOuterAPI 发起调用的)
                 Version brokerVersion = MQVersion.value2Version(request.getVersion());
                 if (brokerVersion.ordinal() >= MQVersion.Version.V3_0_11.ordinal()) {
                     return this.registerBrokerWithFilterServer(ctx, request);
                 } else {
-                    return this.registerBroker(ctx, request);
+                    return this.registerBroker(ctx, request); //yangyc 参数1：包装 serverHandler 的 ctx, 参数2：客户端发送的网络层请求对象, RemotingCommand
                 }
             case RequestCode.UNREGISTER_BROKER:
+                //yangyc 注销 Broker  (BrokerOuterAPI 发起调用的)
                 return this.unregisterBroker(ctx, request);
             case RequestCode.GET_ROUTEINFO_BY_TOPIC:
+                //yangyc 获取指定 Topic 的路由信息
                 return this.getRouteInfoByTopic(ctx, request);
             case RequestCode.GET_BROKER_CLUSTER_INFO:
+                //yangyc 获取 Broker 的集群信息
                 return this.getBrokerClusterInfo(ctx, request);
             case RequestCode.WIPE_WRITE_PERM_OF_BROKER:
+                //yangyc 去除该broker上所有topic的写权限
                 return this.wipeWritePermOfBroker(ctx, request);
             case RequestCode.GET_ALL_TOPIC_LIST_FROM_NAMESERVER:
+                //yangyc 从 NameSrv 获取所有 Topic
                 return getAllTopicListFromNameserver(ctx, request);
             case RequestCode.DELETE_TOPIC_IN_NAMESRV:
+                //yangyc 删除 NameSrv 中的 Topic
                 return deleteTopicInNamesrv(ctx, request);
             case RequestCode.GET_KVLIST_BY_NAMESPACE:
+                //yangyc 获取键值列表
                 return this.getKVListByNamespace(ctx, request);
             case RequestCode.GET_TOPICS_BY_CLUSTER:
+                //yangyc 从集群中获取 Topic
                 return this.getTopicsByCluster(ctx, request);
             case RequestCode.GET_SYSTEM_TOPIC_LIST_FROM_NS:
+                //yangyc 从 NameSrv 中获取系统Topic
                 return this.getSystemTopicListFromNs(ctx, request);
             case RequestCode.GET_UNIT_TOPIC_LIST:
+                //yangyc 单元化相关 topic
                 return this.getUnitTopicList(ctx, request);
             case RequestCode.GET_HAS_UNIT_SUB_TOPIC_LIST:
+                //yangyc 获取含有单元化订阅组的 Topic 列表
                 return this.getHasUnitSubTopicList(ctx, request);
             case RequestCode.GET_HAS_UNIT_SUB_UNUNIT_TOPIC_LIST:
+                //yangyc 获取含有单元化订阅组的非单元化 Topic 列表
                 return this.getHasUnitSubUnUnitTopicList(ctx, request);
             case RequestCode.UPDATE_NAMESRV_CONFIG:
+                //yangyc 修改 NameServer 配置
                 return this.updateConfig(ctx, request);
             case RequestCode.GET_NAMESRV_CONFIG:
+                //yangyc 获取 NameServer 配置
                 return this.getConfig(ctx, request);
             default:
                 break;
@@ -240,9 +259,9 @@ public class DefaultRequestProcessor extends AsyncNettyRequestProcessor implemen
 
     private boolean checksum(ChannelHandlerContext ctx, RemotingCommand request,
         RegisterBrokerRequestHeader requestHeader) {
-        if (requestHeader.getBodyCrc32() != 0) {
-            final int crc32 = UtilAll.crc32(request.getBody());
-            if (crc32 != requestHeader.getBodyCrc32()) {
+        if (requestHeader.getBodyCrc32() != 0) { //yangyc requestHeader.getBodyCrc32(), 这个值是客户端那边计算出来, 保存到 header 中
+            final int crc32 = UtilAll.crc32(request.getBody()); //yangyc 服务器再次根据 body 计算 crc
+            if (crc32 != requestHeader.getBodyCrc32()) { //yangyc 两次计算的 crc 不一致, 说明服务器拿到的 request 和客户端发送 request 数据不一致
                 log.warn(String.format("receive registerBroker request,crc32 not match,from %s",
                     RemotingHelper.parseChannelRemoteAddr(ctx.channel())));
                 return false;
@@ -274,29 +293,34 @@ public class DefaultRequestProcessor extends AsyncNettyRequestProcessor implemen
         responseHeader.setChanged(changed);
         return response;
     }
-
+    //yangyc-main 参数1：包装 serverHandler 的 ctx, 参数2：客户端发送的网络层请求对象, RemotingCommand
     public RemotingCommand registerBroker(ChannelHandlerContext ctx,
         RemotingCommand request) throws RemotingCommandException {
+        //yangyc 创建响应请求的对象, response.customHeader 是一个 RegisterBrokerResponseHeader 实例对象
         final RemotingCommand response = RemotingCommand.createResponseCommand(RegisterBrokerResponseHeader.class);
+        //yangyc 获取刚刚反射创建的 RegisterBrokerResponseHeader 用户自定义 header 对象
         final RegisterBrokerResponseHeader responseHeader = (RegisterBrokerResponseHeader) response.readCustomHeader();
+        //yangyc 反射创建 RegisterBrokerRequestHeader 对象, 并且将 request.extFields 中的数据写入到该对象中
         final RegisterBrokerRequestHeader requestHeader =
             (RegisterBrokerRequestHeader) request.decodeCommandCustomHeader(RegisterBrokerRequestHeader.class);
 
-        if (!checksum(ctx, request, requestHeader)) {
-            response.setCode(ResponseCode.SYSTEM_ERROR);
+        if (!checksum(ctx, request, requestHeader)) { //yangyc 条件成立: 说明 crc 不通过
+            response.setCode(ResponseCode.SYSTEM_ERROR); //yangyc code 设置成系统错误
             response.setRemark("crc32 not match");
-            return response;
+            return response; //yangyc 返回的 reponse 由 callback 对象处理
         }
-
+        //yangyc 执行到这里，说明 request 是正确的包
         TopicConfigSerializeWrapper topicConfigWrapper;
         if (request.getBody() != null) {
+            //yangyc 解码 body, 解码出来的数据就是当前机器的主题信息
             topicConfigWrapper = TopicConfigSerializeWrapper.decode(request.getBody(), TopicConfigSerializeWrapper.class);
         } else {
             topicConfigWrapper = new TopicConfigSerializeWrapper();
             topicConfigWrapper.getDataVersion().setCounter(new AtomicLong(0));
             topicConfigWrapper.getDataVersion().setTimestamp(0);
         }
-
+        //yangyc-main 注册 broker
+        // 参数1:集群, 参数2:节点ip地址, 参数3:brokerName, 参数4:brokerId,注意0的brokerId的节点为主节点, 参数5:ha节点ip地址, 参数6:当前节点的主题信息, 参数7:过滤服务器列表, 参数8:当前服务器和客户端的通信channel
         RegisterBrokerResult result = this.namesrvController.getRouteInfoManager().registerBroker(
             requestHeader.getClusterName(),
             requestHeader.getBrokerAddr(),
@@ -307,10 +331,10 @@ public class DefaultRequestProcessor extends AsyncNettyRequestProcessor implemen
             null,
             ctx.channel()
         );
-
+        //yangyc 将结果信息写到 responseHeader 中
         responseHeader.setHaServerAddr(result.getHaServerAddr());
         responseHeader.setMasterAddr(result.getMasterAddr());
-
+        //yangyc 获取 kv 配置，写入 response body 中。 kv 配置是顺序相关的
         byte[] jsonValue = this.namesrvController.getKvConfigManager().getKVListByNamespace(NamesrvUtil.NAMESPACE_ORDER_TOPIC_CONFIG);
         response.setBody(jsonValue);
         response.setCode(ResponseCode.SUCCESS);

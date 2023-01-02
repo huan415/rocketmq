@@ -164,6 +164,8 @@ import org.apache.rocketmq.remoting.protocol.LanguageCode;
 import org.apache.rocketmq.remoting.protocol.RemotingCommand;
 import org.apache.rocketmq.remoting.protocol.RemotingSerializable;
 
+//yangyc-main 源码长，内部做的事情很简单：把业务数据转换成 RemotingCommand, 然后使用 NettyRemotingClient 完成 IO 通信
+// 发送消息方法、查询消息方法、获取消息方法、admin相关方法。
 public class MQClientAPIImpl {
 
     private final static InternalLogger log = ClientLogger.getLog();
@@ -173,22 +175,24 @@ public class MQClientAPIImpl {
     static {
         System.setProperty(RemotingCommand.REMOTING_VERSION_KEY, Integer.toString(MQVersion.CURRENT_VERSION));
     }
-
+    //yangyc-main 客户端网络层对象，管理客户端与服务器之间连接的 ch 对象. 通过它提供的 invoke 系列方法，客户端可以与服务器进行远程调用
     private final RemotingClient remotingClient;
     private final TopAddressing topAddressing;
     private final ClientRemotingProcessor clientRemotingProcessor;
     private String nameSrvAddr = null;
     private ClientConfig clientConfig;
-
+    //yangyc 创建 API 实现对象。参数1：客户端网络配置,参数2：客户端协议处理器 要注册到客户端网络层,参数3：rpcHook 要注册到客户端网络层,参数4：客户端配置
     public MQClientAPIImpl(final NettyClientConfig nettyClientConfig,
         final ClientRemotingProcessor clientRemotingProcessor,
         RPCHook rpcHook, final ClientConfig clientConfig) {
         this.clientConfig = clientConfig;
         topAddressing = new TopAddressing(MixAll.getWSAddr(), clientConfig.getUnitName());
+        //yangyc 创建网络层对象。参数1：客户端网络配置  参数2：null 客户端并不关心 channel event
         this.remotingClient = new NettyRemotingClient(nettyClientConfig, null);
         this.clientRemotingProcessor = clientRemotingProcessor;
-
+        //yangyc 注册 rpcHook
         this.remotingClient.registerRPCHook(rpcHook);
+        //yangyc 注册 业务处理器
         this.remotingClient.registerProcessor(RequestCode.CHECK_TRANSACTION_STATE, this.clientRemotingProcessor, null);
 
         this.remotingClient.registerProcessor(RequestCode.NOTIFY_CONSUMER_IDS_CHANGED, this.clientRemotingProcessor, null);
@@ -204,6 +208,7 @@ public class MQClientAPIImpl {
         this.remotingClient.registerProcessor(RequestCode.PUSH_REPLY_MESSAGE_TO_CLIENT, this.clientRemotingProcessor, null);
     }
 
+    //yangyc 获取 namesrvAddr 地址（非远程：NettyRemotingClient.namesrvAddrList属性）
     public List<String> getNameServerAddressList() {
         return this.remotingClient.getNameServerAddressList();
     }
@@ -212,6 +217,7 @@ public class MQClientAPIImpl {
         return remotingClient;
     }
 
+    //yangyc 获取 namesrvAddr 地址（Http形式,并跟新到 NettyRemotingClient.namesrvAddrList属性）
     public String fetchNameServerAddr() {
         try {
             String addrs = this.topAddressing.fetchNSAddr();
@@ -234,7 +240,7 @@ public class MQClientAPIImpl {
         List<String> list = Arrays.asList(addrArray);
         this.remotingClient.updateNameServerAddressList(list);
     }
-
+    //yangyc-main 启用客户端网络层入口
     public void start() {
         this.remotingClient.start();
     }
@@ -243,6 +249,7 @@ public class MQClientAPIImpl {
         this.remotingClient.shutdown();
     }
 
+    //yangyc 请求 broker 创建订阅分组（可以指定broker或者指定cluster）
     public void createSubscriptionGroup(final String addr, final SubscriptionGroupConfig config,
         final long timeoutMillis)
         throws RemotingException, MQBrokerException, InterruptedException, MQClientException {
@@ -266,6 +273,7 @@ public class MQClientAPIImpl {
 
     }
 
+    //yangyc 创建主题, 1. tpoic不存在自动创建,   2.MQAdminImpl.createTopic()
     public void createTopic(final String addr, final String defaultTopic, final TopicConfig topicConfig,
         final long timeoutMillis)
         throws RemotingException, MQBrokerException, InterruptedException, MQClientException {
@@ -295,6 +303,7 @@ public class MQClientAPIImpl {
         throw new MQClientException(response.getCode(), response.getRemark());
     }
 
+    //yangyc 创建 普通访问权限
     public void createPlainAccessConfig(final String addr, final PlainAccessConfig plainAccessConfig,
         final long timeoutMillis)
         throws RemotingException, MQBrokerException, InterruptedException, MQClientException {
@@ -324,6 +333,7 @@ public class MQClientAPIImpl {
         throw new MQClientException(response.getCode(), response.getRemark());
     }
 
+    //yangyc 删除 普通访问权限
     public void deleteAccessConfig(final String addr, final String accessKey, final long timeoutMillis)
         throws RemotingException, MQBrokerException, InterruptedException, MQClientException {
         DeleteAccessConfigRequestHeader requestHeader = new DeleteAccessConfigRequestHeader();
@@ -345,6 +355,7 @@ public class MQClientAPIImpl {
         throw new MQClientException(response.getCode(), response.getRemark());
     }
 
+    //yangyc 更新全局白名单配置，这是一个全局白名单地址
     public void updateGlobalWhiteAddrsConfig(final String addr, final String globalWhiteAddrs, final long timeoutMillis)
         throws RemotingException, MQBrokerException, InterruptedException, MQClientException {
 
@@ -367,6 +378,7 @@ public class MQClientAPIImpl {
         throw new MQClientException(response.getCode(), response.getRemark());
     }
 
+    //yangyc 获取 Broker 集群的 ACL 信息
     public ClusterAclVersionInfo getBrokerClusterAclInfo(final String addr,
         final long timeoutMillis) throws RemotingCommandException, InterruptedException, RemotingTimeoutException,
         RemotingSendRequestException, RemotingConnectException, MQBrokerException {
@@ -394,6 +406,7 @@ public class MQClientAPIImpl {
 
     }
 
+    //yangyc 获取 Broker 集群的 ACL 配置
     public AclConfig getBrokerClusterConfig(final String addr, final long timeoutMillis) throws RemotingCommandException, InterruptedException, RemotingTimeoutException,
         RemotingSendRequestException, RemotingConnectException, MQBrokerException {
         RemotingCommand request = RemotingCommand.createRequestCommand(RequestCode.GET_BROKER_CLUSTER_ACL_CONFIG, null);
@@ -417,7 +430,7 @@ public class MQClientAPIImpl {
         throw new MQBrokerException(response.getCode(), response.getRemark(), addr);
 
     }
-
+    //yangyc 获取API对象，调用发送方法。参数1：broker地址,参数2：brokerName,参数3：消息,参数4：SendMessageRequestHeader,参数5：剩余超时时间,参数6：发送模式,参数7：context,参数8：生产者对象
     public SendResult sendMessage(
         final String addr,
         final String brokerName,
@@ -428,9 +441,12 @@ public class MQClientAPIImpl {
         final SendMessageContext context,
         final DefaultMQProducerImpl producer
     ) throws RemotingException, MQBrokerException, InterruptedException {
+        //yangyc 获取API对象，调用发送方法。参数1：broker地址,参数2：brokerName,参数3：消息,参数4：SendMessageRequestHeader,参数5：剩余超时时间,参数6：发送模式,
+        // 参数7：异步回调处理对象，同步所以是null,参数8：主题发布信息，这里是null,参数9：客户端实例，这里是null,参数10：重试次数，这里是0,参数11：context,参数12：生产者对象
         return sendMessage(addr, brokerName, msg, requestHeader, timeoutMillis, communicationMode, null, null, null, 0, context, producer);
     }
-
+    //yangyc 获取API对象，调用发送方法。参数1：broker地址,参数2：brokerName,参数3：消息,参数4：SendMessageRequestHeader,参数5：剩余超时时间,参数6：发送模式,
+    // 参数7：异步回调处理对象，同步所以是null,参数8：主题发布信息，这里是null,参数9：客户端实例，这里是null,参数10：重试次数，这里是0,参数11：context,参数12：生产者对象
     public SendResult sendMessage(
         final String addr,
         final String brokerName,
@@ -464,7 +480,7 @@ public class MQClientAPIImpl {
                 request = RemotingCommand.createRequestCommand(RequestCode.SEND_MESSAGE, requestHeader);
             }
         }
-        request.setBody(msg.getBody());
+        request.setBody(msg.getBody()); //yangyc 设置消息体到网络传输层的 body
 
         switch (communicationMode) {
             case ONEWAY:
@@ -480,10 +496,11 @@ public class MQClientAPIImpl {
                     retryTimesWhenSendFailed, times, context, producer);
                 return null;
             case SYNC:
-                long costTimeSync = System.currentTimeMillis() - beginStartTime;
+                long costTimeSync = System.currentTimeMillis() - beginStartTime; //yangyc 当前耗时，如果已经超过超时限制，则抛出异常
                 if (timeoutMillis < costTimeSync) {
                     throw new RemotingTooMuchRequestException("sendMessage call timeout");
                 }
+                //yangyc-main 同步调用，将消息传递到 broker, broker完成存储后返回
                 return this.sendMessageSync(addr, brokerName, msg, timeoutMillis - costTimeSync, request);
             default:
                 assert false;
@@ -500,6 +517,7 @@ public class MQClientAPIImpl {
         final long timeoutMillis,
         final RemotingCommand request
     ) throws RemotingException, MQBrokerException, InterruptedException {
+        //yangyc-main 同步发送
         RemotingCommand response = this.remotingClient.invokeSync(addr, request, timeoutMillis);
         assert response != null;
         return this.processSendResponse(brokerName, msg, response,addr);
@@ -703,7 +721,7 @@ public class MQClientAPIImpl {
         sendResult.setRegionId(regionId);
         return sendResult;
     }
-
+    //yangyc-mai 向服务端发送 RequstCode.PULL_MESSAFW 参数1：本次拉消息请求的服务器地址； 参数2：拉消息的业务参数封装对象； 参数3：网络调用超时限制 30s； 参数4：RPC网络调用模式 这里是异步； 参数5：拉消息结果处理对象；
     public PullResult pullMessage(
         final String addr,
         final PullMessageRequestHeader requestHeader,
@@ -711,13 +729,14 @@ public class MQClientAPIImpl {
         final CommunicationMode communicationMode,
         final PullCallback pullCallback
     ) throws RemotingException, MQBrokerException, InterruptedException {
+        //yangyc 创建网络层传输对象 RemotingCommand. 该对象封装了 requestHeader
         RemotingCommand request = RemotingCommand.createRequestCommand(RequestCode.PULL_MESSAGE, requestHeader);
 
         switch (communicationMode) {
             case ONEWAY:
                 assert false;
                 return null;
-            case ASYNC:
+            case ASYNC: //yangyc-main 向服务端发送 RequstCode.PULL_MESSAFW(异步)  （Broker 由 PullMessageProcessor 拉取消息）
                 this.pullMessageAsync(addr, request, timeoutMillis, pullCallback);
                 return null;
             case SYNC:
@@ -730,20 +749,29 @@ public class MQClientAPIImpl {
         return null;
     }
 
+    //yangyc-main 向服务端发送 RequstCode.PULL_MESSAFW(异步) --- （Broker 处理时由 PullMessageProcessor 拉取消息）
     private void pullMessageAsync(
         final String addr,
         final RemotingCommand request,
         final long timeoutMillis,
         final PullCallback pullCallback
     ) throws RemotingException, InterruptedException {
+        //yangyc InvokeCallback 最重要，invokeAsync 内部会为本次请求创建一个 ResponseFuture 放入 remotingClient 的 responseFutureTable 中， key 是request.opaque
+        // ResponseFuture{1.opque、2.invokeCallback、3.response}； 当服务器端响应客户端时，会根据response.opque 值找到当前 responseFuture 对象，将结果设置到 responseFuture.response字段
+        // 接下来会检查该 responseFuture。invokeCallback 是否有值，如果有值，说明需要回调处理，接下来，就将该 invokeCallback 封装成任务，提交到 remotingClent 的公共线程池内执行
+        // 执行invokeCallback  operationComplete 转递参数：responseFuture,
         this.remotingClient.invokeAsync(addr, request, timeoutMillis, new InvokeCallback() {
+            //yangyc 调用时机：服务器端响应客户端之后。参数：ResponseFuture
             @Override
             public void operationComplete(ResponseFuture responseFuture) {
+                //yangyc 获取服务器端响应数据：response
                 RemotingCommand response = responseFuture.getResponseCommand();
                 if (response != null) {
                     try {
+                        //yangyc 从 response 内提取出来拉消息的结果对象
                         PullResult pullResult = MQClientAPIImpl.this.processPullResponse(response, addr);
                         assert pullResult != null;
+                        //yangyc 将 pullResult 交给”拉消息结果处理回调对象“，调用它的 successs() 方法
                         pullCallback.onSuccess(pullResult);
                     } catch (Exception e) {
                         pullCallback.onException(e);
@@ -767,6 +795,7 @@ public class MQClientAPIImpl {
         final RemotingCommand request,
         final long timeoutMillis
     ) throws RemotingException, InterruptedException, MQBrokerException {
+        //yangyc-main 通过 mQClientInstance -> mQClientApiImpl#pullMessage()
         RemotingCommand response = this.remotingClient.invokeSync(addr, request, timeoutMillis);
         assert response != null;
         return this.processPullResponse(response, addr);
@@ -776,6 +805,7 @@ public class MQClientAPIImpl {
         final RemotingCommand response,
         final String addr) throws MQBrokerException, RemotingCommandException {
         PullStatus pullStatus = PullStatus.NO_NEW_MSG;
+        //yangyc code 转换规则
         switch (response.getCode()) {
             case ResponseCode.SUCCESS:
                 pullStatus = PullStatus.FOUND;
@@ -796,11 +826,13 @@ public class MQClientAPIImpl {
 
         PullMessageResponseHeader responseHeader =
             (PullMessageResponseHeader) response.decodeCommandCustomHeader(PullMessageResponseHeader.class);
-
+        //yangyc 创建 PullResultExt 对象；参数1：pullStatus状态；参数2：nextBeginOffset；参数3：minOffset；参数4：maxOffset；
+        // 参数5：null；参数6：服务器端推荐下次该mq拉消息时，使用的主机id；参数7：消息列表二进制表示；
         return new PullResultExt(pullStatus, responseHeader.getNextBeginOffset(), responseHeader.getMinOffset(),
             responseHeader.getMaxOffset(), null, responseHeader.getSuggestWhichBrokerId(), response.getBody());
     }
 
+    //yangyc 根据 phyoffset 查询消息
     public MessageExt viewMessage(final String addr, final long phyoffset, final long timeoutMillis)
         throws RemotingException, MQBrokerException, InterruptedException {
         ViewMessageRequestHeader requestHeader = new ViewMessageRequestHeader();
@@ -827,6 +859,7 @@ public class MQClientAPIImpl {
         throw new MQBrokerException(response.getCode(), response.getRemark(), addr);
     }
 
+    //yangyc MQAdminImpl 根据时间戳获取offset信息
     public long searchOffset(final String addr, final String topic, final int queueId, final long timestamp,
         final long timeoutMillis)
         throws RemotingException, MQBrokerException, InterruptedException {
@@ -852,6 +885,7 @@ public class MQClientAPIImpl {
         throw new MQBrokerException(response.getCode(), response.getRemark(), addr);
     }
 
+    //yangyc 取这个mq的最大偏移位（consumequeue目录中的最大偏移位）
     public long getMaxOffset(final String addr, final String topic, final int queueId, final long timeoutMillis)
         throws RemotingException, MQBrokerException, InterruptedException {
         GetMaxOffsetRequestHeader requestHeader = new GetMaxOffsetRequestHeader();
@@ -876,6 +910,7 @@ public class MQClientAPIImpl {
         throw new MQBrokerException(response.getCode(), response.getRemark(), addr);
     }
 
+    //yangyc 通过消费者组获取消费者列表
     public List<String> getConsumerIdListByGroup(
         final String addr,
         final String consumerGroup,
@@ -903,6 +938,7 @@ public class MQClientAPIImpl {
         throw new MQBrokerException(response.getCode(), response.getRemark(), addr);
     }
 
+    //yangyc 取这个mq的最小偏移位（consumequeue目录中的最小偏移位）
     public long getMinOffset(final String addr, final String topic, final int queueId, final long timeoutMillis)
         throws RemotingException, MQBrokerException, InterruptedException {
         GetMinOffsetRequestHeader requestHeader = new GetMinOffsetRequestHeader();
@@ -927,6 +963,7 @@ public class MQClientAPIImpl {
         throw new MQBrokerException(response.getCode(), response.getRemark(), addr);
     }
 
+    //yangyc 获取最早的存储消息时间
     public long getEarliestMsgStoretime(final String addr, final String topic, final int queueId,
         final long timeoutMillis)
         throws RemotingException, MQBrokerException, InterruptedException {
@@ -952,6 +989,7 @@ public class MQClientAPIImpl {
         throw new MQBrokerException(response.getCode(), response.getRemark(), addr);
     }
 
+    //yangyc 查询指定队列的消费偏移量
     public long queryConsumerOffset(
         final String addr,
         final QueryConsumerOffsetRequestHeader requestHeader,
@@ -976,6 +1014,7 @@ public class MQClientAPIImpl {
         throw new MQBrokerException(response.getCode(), response.getRemark(), addr);
     }
 
+    //yangyc 更新指定队列的消费偏移量
     public void updateConsumerOffset(
         final String addr,
         final UpdateConsumerOffsetRequestHeader requestHeader,
@@ -997,6 +1036,7 @@ public class MQClientAPIImpl {
         throw new MQBrokerException(response.getCode(), response.getRemark(), addr);
     }
 
+    //yangyc 更新单向指定队列的消费偏移量
     public void updateConsumerOffsetOneway(
         final String addr,
         final UpdateConsumerOffsetRequestHeader requestHeader,
@@ -1008,6 +1048,7 @@ public class MQClientAPIImpl {
         this.remotingClient.invokeOneway(MixAll.brokerVIPChannel(this.clientConfig.isVipChannelEnabled(), addr), request, timeoutMillis);
     }
 
+    //yangyc 发送心跳数据到broker上
     public int sendHearbeat(
         final String addr,
         final HeartbeatData heartbeatData,
@@ -1029,6 +1070,7 @@ public class MQClientAPIImpl {
         throw new MQBrokerException(response.getCode(), response.getRemark(), addr);
     }
 
+    //yangyc 注销客户端
     public void unregisterClient(
         final String addr,
         final String clientID,
@@ -1055,6 +1097,7 @@ public class MQClientAPIImpl {
         throw new MQBrokerException(response.getCode(), response.getRemark(), addr);
     }
 
+    //yangyc  事务消息时，单向结束事务
     public void endTransactionOneway(
         final String addr,
         final EndTransactionRequestHeader requestHeader,
@@ -1067,6 +1110,7 @@ public class MQClientAPIImpl {
         this.remotingClient.invokeOneway(addr, request, timeoutMillis);
     }
 
+    //yangyc 查询一段时间内的消息
     public void queryMessage(
         final String addr,
         final QueryMessageRequestHeader requestHeader,
@@ -1080,6 +1124,7 @@ public class MQClientAPIImpl {
             invokeCallback);
     }
 
+    //yangyc 取消注册client
     public boolean registerClient(final String addr, final HeartbeatData heartbeat, final long timeoutMillis)
         throws RemotingException, InterruptedException {
         RemotingCommand request = RemotingCommand.createRequestCommand(RequestCode.HEART_BEAT, null);
@@ -1089,6 +1134,7 @@ public class MQClientAPIImpl {
         return response.getCode() == ResponseCode.SUCCESS;
     }
 
+    //yangyc 向broker发送消息回退请求
     public void consumerSendMessageBack(
         final String addr,
         final MessageExt msg,
@@ -1121,6 +1167,7 @@ public class MQClientAPIImpl {
         throw new MQBrokerException(response.getCode(), response.getRemark(), addr);
     }
 
+    //yangyc  批量加锁消息队列
     public Set<MessageQueue> lockBatchMQ(
         final String addr,
         final LockBatchRequestBody requestBody,
@@ -1143,6 +1190,7 @@ public class MQClientAPIImpl {
         throw new MQBrokerException(response.getCode(), response.getRemark(), addr);
     }
 
+    //yangyc 批量解锁消息队列
     public void unlockBatchMQ(
         final String addr,
         final UnlockBatchRequestBody requestBody,
@@ -1170,6 +1218,7 @@ public class MQClientAPIImpl {
         }
     }
 
+    //yangyc 获取 Topic 的度量指标
     public TopicStatsTable getTopicStatsInfo(final String addr, final String topic,
         final long timeoutMillis) throws InterruptedException,
         RemotingTimeoutException, RemotingSendRequestException, RemotingConnectException, MQBrokerException {
@@ -1192,12 +1241,14 @@ public class MQClientAPIImpl {
         throw new MQBrokerException(response.getCode(), response.getRemark(), addr);
     }
 
+    //yangyc 获取消费者的状态
     public ConsumeStats getConsumeStats(final String addr, final String consumerGroup, final long timeoutMillis)
         throws InterruptedException, RemotingTimeoutException, RemotingSendRequestException, RemotingConnectException,
         MQBrokerException {
         return getConsumeStats(addr, consumerGroup, null, timeoutMillis);
     }
 
+    //yangyc 获取消费者的度量指标
     public ConsumeStats getConsumeStats(final String addr, final String consumerGroup, final String topic,
         final long timeoutMillis)
         throws InterruptedException, RemotingTimeoutException, RemotingSendRequestException, RemotingConnectException,
@@ -1222,6 +1273,7 @@ public class MQClientAPIImpl {
         throw new MQBrokerException(response.getCode(), response.getRemark(), addr);
     }
 
+    //yangyc 获取生产者连接信息
     public ProducerConnection getProducerConnectionList(final String addr, final String producerGroup,
         final long timeoutMillis)
         throws RemotingConnectException, RemotingSendRequestException, RemotingTimeoutException, InterruptedException,
@@ -1244,6 +1296,7 @@ public class MQClientAPIImpl {
         throw new MQBrokerException(response.getCode(), response.getRemark(), addr);
     }
 
+    //yangyc 获取消费者连接信息
     public ConsumerConnection getConsumerConnectionList(final String addr, final String consumerGroup,
         final long timeoutMillis)
         throws RemotingConnectException, RemotingSendRequestException, RemotingTimeoutException, InterruptedException,
@@ -1266,6 +1319,7 @@ public class MQClientAPIImpl {
         throw new MQBrokerException(response.getCode(), response.getRemark(), addr);
     }
 
+    //yangyc 获取broker运行时信息
     public KVTable getBrokerRuntimeInfo(final String addr, final long timeoutMillis) throws RemotingConnectException,
         RemotingSendRequestException, RemotingTimeoutException, InterruptedException, MQBrokerException {
 
@@ -1284,6 +1338,7 @@ public class MQClientAPIImpl {
         throw new MQBrokerException(response.getCode(), response.getRemark(), addr);
     }
 
+    //yangyc 更新Broker的配置文件
     public void updateBrokerConfig(final String addr, final Properties properties, final long timeoutMillis)
         throws RemotingConnectException, RemotingSendRequestException, RemotingTimeoutException, InterruptedException,
         MQBrokerException, UnsupportedEncodingException {
@@ -1307,6 +1362,7 @@ public class MQClientAPIImpl {
         }
     }
 
+    //yangyc 获取Broker的配置文件
     public Properties getBrokerConfig(final String addr, final long timeoutMillis)
         throws RemotingConnectException, RemotingSendRequestException, RemotingTimeoutException, InterruptedException,
         MQBrokerException, UnsupportedEncodingException {
@@ -1325,6 +1381,7 @@ public class MQClientAPIImpl {
         throw new MQBrokerException(response.getCode(), response.getRemark(), addr);
     }
 
+    //yangyc DefaultMQAdminExtImpl 获取Cluster及Broker信息
     public ClusterInfo getBrokerClusterInfo(
         final long timeoutMillis) throws InterruptedException, RemotingTimeoutException,
         RemotingSendRequestException, RemotingConnectException, MQBrokerException {
@@ -1343,18 +1400,21 @@ public class MQClientAPIImpl {
         throw new MQBrokerException(response.getCode(), response.getRemark());
     }
 
+    //yangyc 获取默认topic=TBW102的路由信息
     public TopicRouteData getDefaultTopicRouteInfoFromNameServer(final String topic, final long timeoutMillis)
         throws RemotingException, MQClientException, InterruptedException {
 
         return getTopicRouteInfoFromNameServer(topic, timeoutMillis, false);
     }
 
+    //yangyc 从 nameServer 获取路由信息
     public TopicRouteData getTopicRouteInfoFromNameServer(final String topic, final long timeoutMillis)
         throws RemotingException, MQClientException, InterruptedException {
 
         return getTopicRouteInfoFromNameServer(topic, timeoutMillis, true);
     }
 
+    //yangyc 从 nameServer 获取路由信息
     public TopicRouteData getTopicRouteInfoFromNameServer(final String topic, final long timeoutMillis,
         boolean allowTopicNotExist) throws MQClientException, InterruptedException, RemotingTimeoutException, RemotingSendRequestException, RemotingConnectException {
         GetRouteInfoRequestHeader requestHeader = new GetRouteInfoRequestHeader();
@@ -1385,6 +1445,7 @@ public class MQClientAPIImpl {
         throw new MQClientException(response.getCode(), response.getRemark());
     }
 
+    //yangyc 获取Topic名称列表从NameServer
     public TopicList getTopicListFromNameServer(final long timeoutMillis)
         throws RemotingException, MQClientException, InterruptedException {
         RemotingCommand request = RemotingCommand.createRequestCommand(RequestCode.GET_ALL_TOPIC_LIST_FROM_NAMESERVER, null);
@@ -1405,6 +1466,7 @@ public class MQClientAPIImpl {
         throw new MQClientException(response.getCode(), response.getRemark());
     }
 
+    //yangyc 去除该broker上所有topic的写权限
     public int wipeWritePermOfBroker(final String namesrvAddr, String brokerName,
         final long timeoutMillis) throws RemotingCommandException,
         RemotingConnectException, RemotingSendRequestException, RemotingTimeoutException, InterruptedException, MQClientException {
@@ -1428,6 +1490,7 @@ public class MQClientAPIImpl {
         throw new MQClientException(response.getCode(), response.getRemark());
     }
 
+    //yangyc 删除broker上的Topic信息（上次遍历 broker调用这个方法）。
     public void deleteTopicInBroker(final String addr, final String topic, final long timeoutMillis)
         throws RemotingException, MQBrokerException, InterruptedException, MQClientException {
         DeleteTopicRequestHeader requestHeader = new DeleteTopicRequestHeader();
@@ -1448,6 +1511,7 @@ public class MQClientAPIImpl {
         throw new MQClientException(response.getCode(), response.getRemark());
     }
 
+    //yangyc  删除namesrv中的topic信息
     public void deleteTopicInNameServer(final String addr, final String topic, final long timeoutMillis)
         throws RemotingException, MQBrokerException, InterruptedException, MQClientException {
         DeleteTopicRequestHeader requestHeader = new DeleteTopicRequestHeader();
@@ -1467,6 +1531,7 @@ public class MQClientAPIImpl {
         throw new MQClientException(response.getCode(), response.getRemark());
     }
 
+    //yangyc 请求 broker 删除订阅分组（可以指定broker或者指定cluster）
     public void deleteSubscriptionGroup(final String addr, final String groupName, final long timeoutMillis)
         throws RemotingException, MQBrokerException, InterruptedException, MQClientException {
         DeleteSubscriptionGroupRequestHeader requestHeader = new DeleteSubscriptionGroupRequestHeader();
@@ -1487,6 +1552,7 @@ public class MQClientAPIImpl {
         throw new MQClientException(response.getCode(), response.getRemark());
     }
 
+    //yangyc 根据NameSpace和key获取NameServer配置信息；由DefaultMQAdminExt使用
     public String getKVConfigValue(final String namespace, final String key, final long timeoutMillis)
         throws RemotingException, MQClientException, InterruptedException {
         GetKVConfigRequestHeader requestHeader = new GetKVConfigRequestHeader();
@@ -1510,6 +1576,7 @@ public class MQClientAPIImpl {
         throw new MQClientException(response.getCode(), response.getRemark());
     }
 
+    //yangyc 放入KV键值配置；由DefaultMQAdminExt使用
     public void putKVConfigValue(final String namespace, final String key, final String value, final long timeoutMillis)
         throws RemotingException, MQClientException, InterruptedException {
         PutKVConfigRequestHeader requestHeader = new PutKVConfigRequestHeader();
@@ -1540,6 +1607,7 @@ public class MQClientAPIImpl {
         }
     }
 
+    //yangyc 删除KV键值配置
     public void deleteKVConfigValue(final String namespace, final String key, final long timeoutMillis)
         throws RemotingException, MQClientException, InterruptedException {
         DeleteKVConfigRequestHeader requestHeader = new DeleteKVConfigRequestHeader();
@@ -1568,6 +1636,7 @@ public class MQClientAPIImpl {
         }
     }
 
+    //yangyc 拿到configTable对应namespace的所有记录
     public KVTable getKVListByNamespace(final String namespace, final long timeoutMillis)
         throws RemotingException, MQClientException, InterruptedException {
         GetKVListByNamespaceRequestHeader requestHeader = new GetKVListByNamespaceRequestHeader();
@@ -1588,12 +1657,14 @@ public class MQClientAPIImpl {
         throw new MQClientException(response.getCode(), response.getRemark());
     }
 
+    //yangyc 消息回溯
     public Map<MessageQueue, Long> invokeBrokerToResetOffset(final String addr, final String topic, final String group,
         final long timestamp, final boolean isForce, final long timeoutMillis)
         throws RemotingException, MQClientException, InterruptedException {
         return invokeBrokerToResetOffset(addr, topic, group, timestamp, isForce, timeoutMillis, false);
     }
 
+    //yangyc 消息回溯（让 Broker 重置消费进度）
     public Map<MessageQueue, Long> invokeBrokerToResetOffset(final String addr, final String topic, final String group,
         final long timestamp, final boolean isForce, final long timeoutMillis, boolean isC)
         throws RemotingException, MQClientException, InterruptedException {
@@ -1625,6 +1696,7 @@ public class MQClientAPIImpl {
         throw new MQClientException(response.getCode(), response.getRemark());
     }
 
+    //yangyc 让 Broker 更新消费者的度量信息
     public Map<String, Map<MessageQueue, Long>> invokeBrokerToGetConsumerStatus(final String addr, final String topic,
         final String group,
         final String clientAddr,
@@ -1653,6 +1725,7 @@ public class MQClientAPIImpl {
         throw new MQClientException(response.getCode(), response.getRemark());
     }
 
+    //yangyc 查询消息被谁消费
     public GroupList queryTopicConsumeByWho(final String addr, final String topic, final long timeoutMillis)
         throws RemotingConnectException, RemotingSendRequestException, RemotingTimeoutException, InterruptedException,
         MQBrokerException {
@@ -1675,6 +1748,7 @@ public class MQClientAPIImpl {
         throw new MQBrokerException(response.getCode(), response.getRemark(), addr);
     }
 
+    //yangyc 查询消费时间
     public List<QueueTimeSpan> queryConsumeTimeSpan(final String addr, final String topic, final String group,
         final long timeoutMillis)
         throws RemotingConnectException, RemotingSendRequestException, RemotingTimeoutException, InterruptedException,
@@ -1699,6 +1773,7 @@ public class MQClientAPIImpl {
         throw new MQBrokerException(response.getCode(), response.getRemark(), addr);
     }
 
+    //yangyc  获取集群的所有topic
     public TopicList getTopicsByCluster(final String cluster, final long timeoutMillis)
         throws RemotingException, MQClientException, InterruptedException {
         GetTopicsByClusterRequestHeader requestHeader = new GetTopicsByClusterRequestHeader();
@@ -1722,6 +1797,7 @@ public class MQClientAPIImpl {
         throw new MQClientException(response.getCode(), response.getRemark());
     }
 
+    //yangyc 注册过滤类的消息
     public void registerMessageFilterClass(final String addr,
         final String consumerGroup,
         final String topic,
@@ -1750,6 +1826,7 @@ public class MQClientAPIImpl {
         throw new MQBrokerException(response.getCode(), response.getRemark(), addr);
     }
 
+    //yangyc 从 NameSrv 中获取系统Topic
     public TopicList getSystemTopicList(
         final long timeoutMillis) throws RemotingException, MQClientException, InterruptedException {
         RemotingCommand request = RemotingCommand.createRequestCommand(RequestCode.GET_SYSTEM_TOPIC_LIST_FROM_NS, null);
@@ -1778,6 +1855,7 @@ public class MQClientAPIImpl {
         throw new MQClientException(response.getCode(), response.getRemark());
     }
 
+    //yangyc  获取system topic列表 从 broker中的
     public TopicList getSystemTopicListFromBroker(final String addr, final long timeoutMillis)
         throws RemotingException, MQClientException, InterruptedException {
         RemotingCommand request = RemotingCommand.createRequestCommand(RequestCode.GET_SYSTEM_TOPIC_LIST_FROM_BROKER, null);
@@ -1800,6 +1878,7 @@ public class MQClientAPIImpl {
         throw new MQClientException(response.getCode(), response.getRemark());
     }
 
+    //yangyc 清除过期的消费队列
     public boolean cleanExpiredConsumeQueue(final String addr,
         long timeoutMillis) throws MQClientException, RemotingConnectException,
         RemotingSendRequestException, RemotingTimeoutException, InterruptedException {
@@ -1817,6 +1896,7 @@ public class MQClientAPIImpl {
         throw new MQClientException(response.getCode(), response.getRemark());
     }
 
+    //yangyc 清除无用的topic
     public boolean cleanUnusedTopicByAddr(final String addr,
         long timeoutMillis) throws MQClientException, RemotingConnectException,
         RemotingSendRequestException, RemotingTimeoutException, InterruptedException {
@@ -1834,6 +1914,7 @@ public class MQClientAPIImpl {
         throw new MQClientException(response.getCode(), response.getRemark());
     }
 
+    //yangyc 获取消费者运行时信息
     public ConsumerRunningInfo getConsumerRunningInfo(final String addr, String consumerGroup, String clientId,
         boolean jstack,
         final long timeoutMillis) throws RemotingException, MQClientException, InterruptedException {
@@ -1862,6 +1943,7 @@ public class MQClientAPIImpl {
         throw new MQClientException(response.getCode(), response.getRemark());
     }
 
+    //yangyc 处理直接消费消息
     public ConsumeMessageDirectlyResult consumeMessageDirectly(final String addr,
         String consumerGroup,
         String clientId,
@@ -1892,6 +1974,7 @@ public class MQClientAPIImpl {
         throw new MQClientException(response.getCode(), response.getRemark());
     }
 
+    //yangyc 查询修正偏移量
     public Map<Integer, Long> queryCorrectionOffset(final String addr, final String topic, final String group,
         Set<String> filterGroup,
         long timeoutMillis) throws MQClientException, RemotingConnectException, RemotingSendRequestException, RemotingTimeoutException,
@@ -1927,6 +2010,7 @@ public class MQClientAPIImpl {
         throw new MQClientException(response.getCode(), response.getRemark());
     }
 
+    //yangyc  获取有unit标识的topic 列表
     public TopicList getUnitTopicList(final boolean containRetry, final long timeoutMillis)
         throws RemotingException, MQClientException, InterruptedException {
         RemotingCommand request = RemotingCommand.createRequestCommand(RequestCode.GET_UNIT_TOPIC_LIST, null);
@@ -1957,6 +2041,7 @@ public class MQClientAPIImpl {
         throw new MQClientException(response.getCode(), response.getRemark());
     }
 
+    //yangyc   获取 unit SUB topic  ，比如 %RETRY% TOPIC
     public TopicList getHasUnitSubTopicList(final boolean containRetry, final long timeoutMillis)
         throws RemotingException, MQClientException, InterruptedException {
         RemotingCommand request = RemotingCommand.createRequestCommand(RequestCode.GET_HAS_UNIT_SUB_TOPIC_LIST, null);
@@ -1986,6 +2071,7 @@ public class MQClientAPIImpl {
         throw new MQClientException(response.getCode(), response.getRemark());
     }
 
+    //yangyc   获取 unit SUB topic  ，比如 %RETRY% TOPIC
     public TopicList getHasUnitSubUnUnitTopicList(final boolean containRetry, final long timeoutMillis)
         throws RemotingException, MQClientException, InterruptedException {
         RemotingCommand request = RemotingCommand.createRequestCommand(RequestCode.GET_HAS_UNIT_SUB_UNUNIT_TOPIC_LIST, null);
@@ -2015,6 +2101,7 @@ public class MQClientAPIImpl {
         throw new MQClientException(response.getCode(), response.getRemark());
     }
 
+    //yangyc 从另外一个 group 克隆 offset
     public void cloneGroupOffset(final String addr, final String srcGroup, final String destGroup, final String topic,
         final boolean isOffline,
         final long timeoutMillis) throws RemotingException, MQClientException, InterruptedException {
@@ -2039,6 +2126,7 @@ public class MQClientAPIImpl {
         throw new MQClientException(response.getCode(), response.getRemark());
     }
 
+    //yangyc DefaultMQAdminExtImpl 遍历topic，从broker获取统计数据
     public BrokerStatsData viewBrokerStatsData(String brokerAddr, String statsName, String statsKey, long timeoutMillis)
         throws MQClientException, RemotingConnectException, RemotingSendRequestException, RemotingTimeoutException,
         InterruptedException {
@@ -2071,6 +2159,7 @@ public class MQClientAPIImpl {
         return Collections.EMPTY_SET;
     }
 
+    //yangyc 查询broker消费组状态
     public ConsumeStatsList fetchConsumeStatsInBroker(String brokerAddr, boolean isOrder,
         long timeoutMillis) throws MQClientException,
         RemotingConnectException, RemotingSendRequestException, RemotingTimeoutException, InterruptedException {
@@ -2096,6 +2185,7 @@ public class MQClientAPIImpl {
         throw new MQClientException(response.getCode(), response.getRemark());
     }
 
+    //yangyc 获取所有的订阅组配置信息
     public SubscriptionGroupWrapper getAllSubscriptionGroup(final String brokerAddr,
         long timeoutMillis) throws InterruptedException,
         RemotingTimeoutException, RemotingSendRequestException, RemotingConnectException, MQBrokerException {
@@ -2113,6 +2203,7 @@ public class MQClientAPIImpl {
         throw new MQBrokerException(response.getCode(), response.getRemark(), brokerAddr);
     }
 
+    //yangyc  获取所有的Topic信息
     public TopicConfigSerializeWrapper getAllTopicConfig(final String addr,
         long timeoutMillis) throws RemotingConnectException,
         RemotingSendRequestException, RemotingTimeoutException, InterruptedException, MQBrokerException {
@@ -2132,6 +2223,7 @@ public class MQClientAPIImpl {
         throw new MQBrokerException(response.getCode(), response.getRemark(), addr);
     }
 
+    //yangyc DefaultMQAdminExtImpl 更新NameServer的配置文件
     public void updateNameServerConfig(final Properties properties, final List<String> nameServers, long timeoutMillis)
         throws UnsupportedEncodingException,
         MQBrokerException, InterruptedException, RemotingTimeoutException, RemotingSendRequestException,
@@ -2167,6 +2259,7 @@ public class MQClientAPIImpl {
         }
     }
 
+    //yangyc DefaultMQAdminExtImpl 获取NameServer的配置文件
     public Map<String, Properties> getNameServerConfig(final List<String> nameServers, long timeoutMillis)
         throws InterruptedException,
         RemotingTimeoutException, RemotingSendRequestException, RemotingConnectException,
@@ -2194,6 +2287,7 @@ public class MQClientAPIImpl {
         return configMap;
     }
 
+    //yangyc 查询消费队列
     public QueryConsumeQueueResponseBody queryConsumeQueue(final String brokerAddr, final String topic,
         final int queueId,
         final long index, final int count, final String consumerGroup,
@@ -2220,6 +2314,7 @@ public class MQClientAPIImpl {
         throw new MQClientException(response.getCode(), response.getRemark());
     }
 
+    //yangyc 检查客户端配置
     public void checkClientInBroker(final String brokerAddr, final String consumerGroup,
         final String clientId, final SubscriptionData subscriptionData,
         final long timeoutMillis)
@@ -2243,6 +2338,8 @@ public class MQClientAPIImpl {
         }
     }
 
+
+    //yangyc 检查半消息
     public boolean resumeCheckHalfMessage(final String addr, String msgId,
         final long timeoutMillis) throws RemotingException, MQClientException, InterruptedException {
         ResumeCheckHalfMessageRequestHeader requestHeader = new ResumeCheckHalfMessageRequestHeader();

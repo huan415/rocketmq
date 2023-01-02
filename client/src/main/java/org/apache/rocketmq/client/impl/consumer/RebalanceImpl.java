@@ -42,14 +42,21 @@ import org.apache.rocketmq.common.protocol.heartbeat.SubscriptionData;
 
 public abstract class RebalanceImpl {
     protected static final InternalLogger log = ClientLogger.getLog();
+    //yangyc-main 分配到当前消费者的全部处理队列信息，key:messageQueue    value:processQueue(队列在消费者端的快照)
     protected final ConcurrentMap<MessageQueue, ProcessQueue> processQueueTable = new ConcurrentHashMap<MessageQueue, ProcessQueue>(64);
+    //yangyc-main 消费者订阅主题的队列信息
     protected final ConcurrentMap<String/* topic */, Set<MessageQueue>> topicSubscribeInfoTable =
         new ConcurrentHashMap<String, Set<MessageQueue>>();
+    //yangyc-main 消费者订阅数据。key:主题   value:主题的过滤信息
     protected final ConcurrentMap<String /* topic */, SubscriptionData> subscriptionInner =
         new ConcurrentHashMap<String, SubscriptionData>();
+    //yangyc-main 消费者组
     protected String consumerGroup;
+    //yangyc-main 消费模式，默认：集群模式
     protected MessageModel messageModel;
+    //yangyc-main 分配策略（1.平均分配策略、2.圆环平均分配策略、3.根据机房平均分配策略、4.根据机房平均分配策略加强版）
     protected AllocateMessageQueueStrategy allocateMessageQueueStrategy;
+    //yangyc-main 客户端实例
     protected MQClientInstance mQClientFactory;
 
     public RebalanceImpl(String consumerGroup, MessageModel messageModel,
@@ -163,44 +170,56 @@ public abstract class RebalanceImpl {
         return false;
     }
 
+    //yangyc-main 续约锁
     public void lockAll() {
+        //yangyc-main 将分配给当前消费者的全部mq. 按照 brokerName 分组
+        // key:brokerName    value:该 broker 上分配给当前消费者的 queue 集合
         HashMap<String, Set<MessageQueue>> brokerMqs = this.buildProcessQueueTableByBrokerName();
 
         Iterator<Entry<String, Set<MessageQueue>>> it = brokerMqs.entrySet().iterator();
+        //yangyc-main 遍历所有的分组
         while (it.hasNext()) {
             Entry<String, Set<MessageQueue>> entry = it.next();
+            //yangyc brokerName
             final String brokerName = entry.getKey();
+            //yangyc  该 broker 上分配给当前消费者的 queue 集合
             final Set<MessageQueue> mqs = entry.getValue();
 
             if (mqs.isEmpty())
                 continue;
-
+            //yangyc-main 查询 broker 主节点信息
             FindBrokerResult findBrokerResult = this.mQClientFactory.findBrokerAddressInSubscribe(brokerName, MixAll.MASTER_ID, true);
             if (findBrokerResult != null) {
+                //yangyc-main 封装请求 body
                 LockBatchRequestBody requestBody = new LockBatchRequestBody();
                 requestBody.setConsumerGroup(this.consumerGroup);
                 requestBody.setClientId(this.mQClientFactory.getClientId());
                 requestBody.setMqSet(mqs);
 
                 try {
+                    //yangyc-main 向 broker 发起 批量续约锁的请求。 返回值：续约锁成功的mq集合
                     Set<MessageQueue> lockOKMQSet =
                         this.mQClientFactory.getMQClientAPIImpl().lockBatchMQ(findBrokerResult.getBrokerAddr(), requestBody, 1000);
-
+                    //yangyc-main CASE1: 遍历续约成功的 mq
                     for (MessageQueue mq : lockOKMQSet) {
+                        //yangyc 获取 pq
                         ProcessQueue processQueue = this.processQueueTable.get(mq);
                         if (processQueue != null) {
                             if (!processQueue.isLocked()) {
                                 log.info("the message queue locked OK, Group: {} {}", this.consumerGroup, mq);
                             }
-
+                            //yangyc 占用分布式锁的 locked 设置成 true
                             processQueue.setLocked(true);
+                            //yangyc 保存续约锁的时间为当前时间
                             processQueue.setLastLockTimestamp(System.currentTimeMillis());
                         }
                     }
                     for (MessageQueue mq : mqs) {
+                        //yangyc-main CASE2: 条件成立：说明该 mq 续约锁失败
                         if (!lockOKMQSet.contains(mq)) {
                             ProcessQueue processQueue = this.processQueueTable.get(mq);
                             if (processQueue != null) {
+                                //yangyc 占用分布式锁的 locked 设置成 false. 表示分布式锁尚未占用成功。。。这个时候消费任务不能消费
                                 processQueue.setLocked(false);
                                 log.warn("the message queue locked Failed, Group: {} {}", this.consumerGroup, mq);
                             }
@@ -212,13 +231,17 @@ public abstract class RebalanceImpl {
             }
         }
     }
-
+    //yangyc-main 负载均衡方法 参数：是否是顺序消费
     public void doRebalance(final boolean isOrder) {
+        //yangyc 获取消费者订阅数据
         Map<String, SubscriptionData> subTable = this.getSubscriptionInner();
         if (subTable != null) {
+            //yangyc-main 遍历消费者订阅的每一个主题
             for (final Map.Entry<String, SubscriptionData> entry : subTable.entrySet()) {
+                //yangyc 订阅主题
                 final String topic = entry.getKey();
                 try {
+                    //yangyc-main 按照主题进行负载均衡。参数1：主题；参数2：是否有序
                     this.rebalanceByTopic(topic, isOrder);
                 } catch (Throwable e) {
                     if (!topic.startsWith(MixAll.RETRY_GROUP_TOPIC_PREFIX)) {
@@ -235,6 +258,7 @@ public abstract class RebalanceImpl {
         return subscriptionInner;
     }
 
+    //yangyc-main 按照主题进行负载均衡。参数1：主题；参数2：是否有序
     private void rebalanceByTopic(final String topic, final boolean isOrder) {
         switch (messageModel) {
             case BROADCASTING: {
@@ -254,8 +278,10 @@ public abstract class RebalanceImpl {
                 }
                 break;
             }
-            case CLUSTERING: {
+            case CLUSTERING: { //yangyc 一般都是集群模式
+                //yangyc-main 获取当前处理 ”主题“ 全部 MessageQueue, 从 topicSubscribeInfoTable 获得（该table启动阶段就初始化数据了, 并且客户端也会定时更新该table数据）
                 Set<MessageQueue> mqSet = this.topicSubscribeInfoTable.get(topic);
+                //yangyc-main 获取当前处理 "消费者组" 全部消费者id集合（从服务器获取）
                 List<String> cidAll = this.mQClientFactory.findConsumerIdList(topic, consumerGroup);
                 if (null == mqSet) {
                     if (!topic.startsWith(MixAll.RETRY_GROUP_TOPIC_PREFIX)) {
@@ -271,13 +297,16 @@ public abstract class RebalanceImpl {
                     List<MessageQueue> mqAll = new ArrayList<MessageQueue>();
                     mqAll.addAll(mqSet);
 
-                    Collections.sort(mqAll);
-                    Collections.sort(cidAll);
-
+                    //yangyc-main 主题mq集合 和 消费者ID集合 都进行排序操作。 目的：每个消费者视图一致性
+                    Collections.sort(mqAll); //yangyc 队列排序
+                    Collections.sort(cidAll); //yangyc 客户端id排序
+                    //yangyc 队列分配策略
                     AllocateMessageQueueStrategy strategy = this.allocateMessageQueueStrategy;
-
+                    //yangyc 分配策略 分配结果
                     List<MessageQueue> allocateResult = null;
                     try {
+                        //yangyc-main 调用队列分配策略，给当前消费者进行分配mq， 返回值：分配给当前消费者的队列集合
+                        // 参数1:消费者组，参数2：当前消费者id，参数3：主题全部队列集合（包括所有broker上该主题的mq）,参数4：全部消费者id集合。
                         allocateResult = strategy.allocate(
                             this.consumerGroup,
                             this.mQClientFactory.getClientId(),
@@ -293,7 +322,8 @@ public abstract class RebalanceImpl {
                     if (allocateResult != null) {
                         allocateResultSet.addAll(allocateResult);
                     }
-
+                    //yangyc-main 根据分配给当前消费者的”队列集合“做更新操作
+                    // 返回值：true表示分配给当前消费者的队列发生变化，false表示无变化 参数1:主题，参数2：分配给当前消费者的结果，参数3：是否有序
                     boolean changed = this.updateProcessQueueTableInRebalance(topic, allocateResultSet, isOrder);
                     if (changed) {
                         log.info(
@@ -324,34 +354,42 @@ public abstract class RebalanceImpl {
             }
         }
     }
-
+    //yangyc-main 根据分配给当前消费者的”队列集合“做更新操作
+    // 返回值：true表示分配给当前消费者的队列发生变化，false表示无变化 参数1:主题，参数2：分配给当前消费者的结果，参数3：是否有序
     private boolean updateProcessQueueTableInRebalance(final String topic, final Set<MessageQueue> mqSet,
         final boolean isOrder) {
-        boolean changed = false;
+        boolean changed = false; //yangyc 当前消费者的队列是否有变化
 
         Iterator<Entry<MessageQueue, ProcessQueue>> it = this.processQueueTable.entrySet().iterator();
+        //yangyc-main 计算出本次负载均衡后, 当前消费者 当前主题 被转移走的队列
+        // 对于这些被转移到其他消费者的队列，当前消费者需要：
+        // 1.将 mq -> pq 状态设置为 删除 状态
+        // 2.持久化消费进度 + 删除本地该 mq 的消费进度
+        // 3.ProcessQueueTable 中删除该条 k-v。
         while (it.hasNext()) {
             Entry<MessageQueue, ProcessQueue> next = it.next();
-            MessageQueue mq = next.getKey();
-            ProcessQueue pq = next.getValue();
+            MessageQueue mq = next.getKey(); //yangyc 队列元信息
+            ProcessQueue pq = next.getValue(); //yangyc 队列在消费者端的快照
 
-            if (mq.getTopic().equals(topic)) {
-                if (!mqSet.contains(mq)) {
-                    pq.setDropped(true);
-                    if (this.removeUnnecessaryMessageQueue(mq, pq)) {
-                        it.remove();
-                        changed = true;
+            if (mq.getTopic().equals(topic)) { //yangyc 条件成立：说明该mq是本地 rebalanceImpl 分配算法计算的主题
+                if (!mqSet.contains(mq)) { //yangyc 条件成立：msqSet是最新分配给当前消费者的结果（指定主题）。说明该 mq 分配给了其他 consumer 节点
+                    pq.setDropped(true); //yangyc 将pq删除状态设置成 true，消费任务会一种检查该状态，如果该状态变为删除状态，消费任务会立马退出
+                    if (this.removeUnnecessaryMessageQueue(mq, pq)) { //yangyc 将当前队列相关信息移除走：1.消费进度持久化；2.offsetStore 内当前msq的进度删除，并返回true
+                        it.remove(); //yangyc 从 processQueueTable 移除kv
+                        changed = true; //yangyc 标记当前消费者 消费的队列发生了变化
                         log.info("doRebalance, {}, remove unnecessary mq, {}", consumerGroup, mq);
                     }
-                } else if (pq.isPullExpired()) {
+                } else if (pq.isPullExpired()) { //yangyc 条件成立：1.当前mq还归属当前消费者，2.说明pq已经2min未到服务器拉消息了，可能出现了bug
                     switch (this.consumeType()) {
                         case CONSUME_ACTIVELY:
                             break;
                         case CONSUME_PASSIVELY:
-                            pq.setDropped(true);
+                            pq.setDropped(true); //yangyc 设置pq删除状态为 true, 消费任务检查后会退出
+                            //yangyc 将当前队列相关信息移除走：1.消费进度持久化；2.offsetStore 内当前msq的进度删除
                             if (this.removeUnnecessaryMessageQueue(mq, pq)) {
-                                it.remove();
+                                it.remove(); //yangyc 移除当前kv
                                 changed = true;
+                                //yangyc 出了问题怎么办？相当重启。。。于让下一次rebalance分配到其他节点
                                 log.error("[BUG]doRebalance, {}, remove unnecessary mq, {}, because pull is pause, so try to fixed it",
                                     consumerGroup, mq);
                             }
@@ -363,37 +401,52 @@ public abstract class RebalanceImpl {
             }
         }
 
+        //yangyc-main 计算出本次负载均衡后, 新分配到当前消费给、该主题的队列
+        // 对于这些新分配给当前消费者该主题的队列，当前消费者需要：
+        // 1.创建 ProcessQueue 为每个新分配的队列
+        // 2.获取新分配的队列 的消费进度（offset）, 获取方式：到队列归属的 broker 上拉取
+        // 3.ProcessQueueTable 添加 k-v, key: messageQueue  value:processQueue
+        // 4.为新分配队列，创建 PullRequest 对象（封装：消费者组、mq、pq、消费进度）
+        // 5.上一步创建的 PullRequest 对象转交给 PullMessageService (拉取消息服务)。
+        //yangyc 拉消息请求列表（最终将它交给 PullMessageService 的队列内）
         List<PullRequest> pullRequestList = new ArrayList<PullRequest>();
         for (MessageQueue mq : mqSet) {
-            if (!this.processQueueTable.containsKey(mq)) {
+            if (!this.processQueueTable.containsKey(mq)) { //yangyc 条件成立：说明当前mq是RebalanceImpl之后，新分配给当前 consumer 的队列
+                //yangyc 顺序消费首先需要获取新分配队列的分布式锁
                 if (isOrder && !this.lock(mq)) {
                     log.warn("doRebalance, {}, add a new mq failed, {}, because lock failed", consumerGroup, mq);
+                    //yangyc 获取锁失败、直接 continue
                     continue;
                 }
-
+                //yangyc 删除冗余数据（脏数据） offset
                 this.removeDirtyOffset(mq);
+                //yangyc 为新分配到当前消费者的mq 创建pq(快照队列)
                 ProcessQueue pq = new ProcessQueue();
+                //yangyc 从服务器拉取mq最新的消费进度
                 long nextOffset = this.computePullFromWhere(mq);
                 if (nextOffset >= 0) {
+                    //yangyc 保存kv. key:messageQueue   value：上一步创建的mq对应的pq
                     ProcessQueue pre = this.processQueueTable.putIfAbsent(mq, pq);
                     if (pre != null) {
                         log.info("doRebalance, {}, mq already exists, {}", consumerGroup, mq);
-                    } else {
+                    } else { //yangyc 因为新创建的，所以pre是null
                         log.info("doRebalance, {}, add a new mq, {}", consumerGroup, mq);
+                        //yangyc 拉消息服务依赖于 pullRequest 对象进行拉消息工作，新分配的队列要创建新的pullRequest对象，最终放入拉消息服务的本地阻塞队列内。
                         PullRequest pullRequest = new PullRequest();
                         pullRequest.setConsumerGroup(consumerGroup);
+                        //yangyc 从服务器拉取mq的消费进度，赋值给pullRequest
                         pullRequest.setNextOffset(nextOffset);
                         pullRequest.setMessageQueue(mq);
                         pullRequest.setProcessQueue(pq);
                         pullRequestList.add(pullRequest);
-                        changed = true;
+                        changed = true; //yangyc 标记当前消费者 消费的队列发生了变化
                     }
                 } else {
                     log.warn("doRebalance, {}, add new mq failed, {}", consumerGroup, mq);
                 }
             }
         }
-
+        //yangyc pullRequestList加入到queue
         this.dispatchPullRequest(pullRequestList);
 
         return changed;

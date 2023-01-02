@@ -96,10 +96,13 @@ public class ClientRemotingProcessor extends AsyncNettyRequestProcessor implemen
         return false;
     }
 
+    //yangyc-main 服务器回查指定 “事务消息” 关联的本地事务状态接口
     public RemotingCommand checkTransactionState(ChannelHandlerContext ctx,
         RemotingCommand request) throws RemotingCommandException {
+        //yangyc-main 从 request 解析出服务器端请求的 header 对象
         final CheckTransactionStateRequestHeader requestHeader =
             (CheckTransactionStateRequestHeader) request.decodeCommandCustomHeader(CheckTransactionStateRequestHeader.class);
+        //yangyc-main 从 request.getBody() 解析出服务器回查的事务消息 msg
         final ByteBuffer byteBuffer = ByteBuffer.wrap(request.getBody());
         final MessageExt messageExt = MessageDecoder.decode(byteBuffer);
         if (messageExt != null) {
@@ -107,15 +110,23 @@ public class ClientRemotingProcessor extends AsyncNettyRequestProcessor implemen
                 messageExt.setTopic(NamespaceUtil
                     .withoutNamespace(messageExt.getTopic(), this.mqClientFactory.getClientConfig().getNamespace()));
             }
+            //yangyc-main 从 messageExt#properties 提取 UNIQ_KEY 赋值给 transactionId
             String transactionId = messageExt.getProperty(MessageConst.PROPERTY_UNIQ_CLIENT_MESSAGE_ID_KEYIDX);
             if (null != transactionId && !"".equals(transactionId)) {
                 messageExt.setTransactionId(transactionId);
             }
+            //yangyc-main 从 messageExt#properties 提取 PGROUP, 即消息生产者组名
             final String group = messageExt.getProperty(MessageConst.PROPERTY_PRODUCER_GROUP);
             if (group != null) {
+                //yangyc-main 到客户端实例（mQClientInstance）根据生产者组名查询指定的生产者对象
                 MQProducerInner producer = this.mqClientFactory.selectProducer(group);
                 if (producer != null) {
                     final String addr = RemotingHelper.parseChannelRemoteAddr(ctx.channel());
+                    //yangyc-main 调用生产者对象的 checkTransactionState() 方法
+                    // 参数1：进行回查的broker服务器地址
+                    // 参数2：包括 transactionId，生产者可以根据该id确定事务状态
+                    // 参数3：包括半消息的queueOffset,commitLogOffset 等等信息，生产者查询了 transactionId 关联的事务状态之后，需要给服务器再次提交二阶段确认请求，
+                    // 确认请求需要包含该部分信息，服务器依赖这部分信息进行确认信息逻辑。
                     producer.checkTransactionState(addr, messageExt, requestHeader);
                 } else {
                     log.debug("checkTransactionState, pick producer by group[{}] failed", group);

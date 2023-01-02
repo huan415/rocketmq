@@ -113,14 +113,14 @@ public class RemotingCommand {
     public static RemotingCommand createResponseCommand(int code, String remark,
         Class<? extends CommandCustomHeader> classHeader) {
         RemotingCommand cmd = new RemotingCommand();
-        cmd.markResponseType();
-        cmd.setCode(code);
+        cmd.markResponseType(); //yangyc 设置它是一个响应类型的请求
+        cmd.setCode(code); //yangyc 设置业务代码
         cmd.setRemark(remark);
         setCmdVersion(cmd);
 
         if (classHeader != null) {
             try {
-                CommandCustomHeader objectHeader = classHeader.newInstance();
+                CommandCustomHeader objectHeader = classHeader.newInstance(); //yangyc 反射创建用户自定义的 header 对象
                 cmd.customHeader = objectHeader;
             } catch (InstantiationException e) {
                 return null;

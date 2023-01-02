@@ -17,8 +17,8 @@
 package org.apache.rocketmq.client.impl;
 
 public class FindBrokerResult {
-    private final String brokerAddr;
-    private final boolean slave;
+    private final String brokerAddr; //yangyc 地址
+    private final boolean slave; //yangyc 节点角色（是否为 salve 节点）
     private final int brokerVersion;
 
     public FindBrokerResult(String brokerAddr, boolean slave) {

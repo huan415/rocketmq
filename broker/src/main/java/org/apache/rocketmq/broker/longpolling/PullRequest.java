@@ -22,13 +22,13 @@ import org.apache.rocketmq.remoting.protocol.RemotingCommand;
 import org.apache.rocketmq.store.MessageFilter;
 
 public class PullRequest {
-    private final RemotingCommand requestCommand;
-    private final Channel clientChannel;
-    private final long timeoutMillis;
-    private final long suspendTimestamp;
-    private final long pullFromThisOffset;
-    private final SubscriptionData subscriptionData;
-    private final MessageFilter messageFilter;
+    private final RemotingCommand requestCommand; //yangyc-main 客户端请求 RemotingCommand 对象
+    private final Channel clientChannel; //yangyc-main 服务器和客户端的会话 channel
+    private final long timeoutMillis; //yangyc-main 长轮询超时限制  15s
+    private final long suspendTimestamp; //yangyc-main 长轮询开始时间
+    private final long pullFromThisOffset; //yangyc-main requestComman header 提取出来的本次 pull 队列的 offset
+    private final SubscriptionData subscriptionData; //yangyc-main 该主题的订阅数据
+    private final MessageFilter messageFilter; //yangyc-main 消息过滤器，一般都是 tagCode 过滤
 
     public PullRequest(RemotingCommand requestCommand, Channel clientChannel, long timeoutMillis, long suspendTimestamp,
         long pullFromThisOffset, SubscriptionData subscriptionData,

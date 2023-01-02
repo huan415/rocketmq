@@ -55,12 +55,13 @@ import org.apache.rocketmq.remoting.exception.RemotingException;
  * <p> <strong>Thread Safety:</strong> After configuring and starting process, this class can be regarded as thread-safe
  * and used among multiple threads context. </p>
  */
+//yangyc 1. 业务层使用对象, 业务层使用它完成消息发送 2. 管理配置信息
 public class DefaultMQProducer extends ClientConfig implements MQProducer {
 
     /**
      * Wrapping internal implementations for virtually all methods presented in this class.
      */
-    protected final transient DefaultMQProducerImpl defaultMQProducerImpl;
+    protected final transient DefaultMQProducerImpl defaultMQProducerImpl;  //yangyc 生产者实现类
     private final InternalLogger log = ClientLogger.getLog();
     /**
      * Producer group conceptually aggregates all producer instances of exactly same role, which is particularly
@@ -70,51 +71,51 @@ public class DefaultMQProducer extends ClientConfig implements MQProducer {
      *
      * See {@linktourl http://rocketmq.apache.org/docs/core-concept/} for more discussion.
      */
-    private String producerGroup;
+    private String producerGroup; //yangyc 生产者组（发送事务消息时,broker 端进行事务会查,可以选择当前生产者组下的任意一个生产者进行事务回查）
 
     /**
      * Just for testing or demo program
      */
-    private String createTopicKey = TopicValidator.AUTO_CREATE_TOPIC_KEY_TOPIC;
+    private String createTopicKey = TopicValidator.AUTO_CREATE_TOPIC_KEY_TOPIC; //yangyc TBW102: broker 端写死的主题队列信息, 自动创建主题时, 以此为模板进行创建
 
     /**
      * Number of queues to create per default topic.
      */
-    private volatile int defaultTopicQueueNums = 4;
+    private volatile int defaultTopicQueueNums = 4; //yangyc 默认 broker 每个主题创建的队列数量
 
     /**
      * Timeout for sending messages.
      */
-    private int sendMsgTimeout = 3000;
+    private int sendMsgTimeout = 3000; //yangyc 发送消息超时限制, 默认 3s
 
     /**
      * Compress message body threshold, namely, message body larger than 4k will be compressed on default.
      */
-    private int compressMsgBodyOverHowmuch = 1024 * 4;
+    private int compressMsgBodyOverHowmuch = 1024 * 4; //yangyc 压缩阈值, 当 msg body 超过 4k 后, 进行压缩
 
     /**
      * Maximum number of retry to perform internally before claiming sending failure in synchronous mode. </p>
      *
      * This may potentially cause message duplication which is up to application developers to resolve.
      */
-    private int retryTimesWhenSendFailed = 2;
+    private int retryTimesWhenSendFailed = 2; //yangyc 同步发送失败之后, 重试发送次数:2次 ==> 共3次
 
     /**
      * Maximum number of retry to perform internally before claiming sending failure in asynchronous mode. </p>
      *
      * This may potentially cause message duplication which is up to application developers to resolve.
      */
-    private int retryTimesWhenSendAsyncFailed = 2;
+    private int retryTimesWhenSendAsyncFailed = 2; //yangyc 异步发送失败之后, 重试发送次数:2次 ==> 共3次
 
     /**
      * Indicate whether to retry another broker on sending failure internally.
      */
-    private boolean retryAnotherBrokerWhenNotStoreOK = false;
+    private boolean retryAnotherBrokerWhenNotStoreOK = false; //yangyc 消息未存储成功, 是否选择其他 broker 节点进行消息重试。一般需要设置成 true
 
     /**
      * Maximum allowed message size in bytes.
      */
-    private int maxMessageSize = 1024 * 1024 * 4; // 4M
+    private int maxMessageSize = 1024 * 1024 * 4; // 4M //yangyc 消息体最大限制, 默认 4M
 
     /**
      * Interface of asynchronous transfer data
@@ -203,7 +204,7 @@ public class DefaultMQProducer extends ClientConfig implements MQProducer {
     public DefaultMQProducer(final String namespace, final String producerGroup, RPCHook rpcHook) {
         this.namespace = namespace;
         this.producerGroup = producerGroup;
-        defaultMQProducerImpl = new DefaultMQProducerImpl(this, rpcHook);
+        defaultMQProducerImpl = new DefaultMQProducerImpl(this, rpcHook); //yangyc 创建生产者实现对线。参数1：生产者门面对象, 参数2：rpcHook
     }
 
     /**
@@ -266,12 +267,31 @@ public class DefaultMQProducer extends ClientConfig implements MQProducer {
      *
      * @throws MQClientException if there is any unexpected error.
      */
+    //yangyc-main
+    // 1. 启动 消息轨迹相关
+    // 2. defaultMQProducerImpl 启动生产者实现对象
+    //    1. mQClientFactory (MQClientInstance) 获取或者创建、启动
+    //        1. mQClientAPIImpl 启用客户端网络层入口
+    //            1. remotingClient 启用客户端网络层入口.
+    //        2. pullMessageService 拉消息服务
+    //            1. run() 死循环。
+    //        3. rebalanceService 负载均衡服务
+    //            1. run() 死循环.
+    //        4. defaultMQProducer 启动内部生产者对象，消息回退时使用
+    //        5.启动定时任务入口
+    //            1. 定时任务1：每30s, 从 nameserver 更新客户端本地的路由数据
+    //            2. 定时任务2：每30s, 两个事情：事1. 清理下线的 broker 数据。事2.向在线的 broker 发送心跳
+    //            3. 定时任务3：每5s, 消费者持久化消费进度
+    //            4  定时任务4：每1min, 动态调整消费组线程池。
+    //    2. 启动时会发送一次发送心跳
+    //    3. 定时任务处理 回执太慢 的情况.
     @Override
     public void start() throws MQClientException {
-        this.setProducerGroup(withNamespace(this.producerGroup));
-        this.defaultMQProducerImpl.start();
+        this.setProducerGroup(withNamespace(this.producerGroup)); //yangyc 重置消费组名, 规则：如果传递了命名空间, 则 namespace%group
+        this.defaultMQProducerImpl.start(); //yangyc-main 启动生产者实现对象
         if (null != traceDispatcher) {
             try {
+                //yangyc 消息轨迹相关
                 traceDispatcher.start(this.getNamesrvAddr(), this.getAccessChannel());
             } catch (MQClientException e) {
                 log.warn("trace dispatcher start failed ", e);
@@ -941,8 +961,7 @@ public class DefaultMQProducer extends ClientConfig implements MQProducer {
     }
 
     /**
-     * Sets an Executor to be used for executing callback methods. If the Executor is not set, {@link
-     * NettyRemotingClient#publicExecutor} will be used.
+     * Sets an Executor to be used for executing callback methods. If the Executor is not set, {@linkNettyRemotingClient#publicExecutor} will be used.
      *
      * @param callbackExecutor the instance of Executor
      */

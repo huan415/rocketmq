@@ -30,6 +30,7 @@ public class CheckTransactionStateRequestHeader implements CommandCustomHeader {
     @CFNotNull
     private Long commitLogOffset;
     private String msgId;
+    //yangyc-main 这个值与 msgId 一致
     private String transactionId;
     private String offsetMsgId;
 

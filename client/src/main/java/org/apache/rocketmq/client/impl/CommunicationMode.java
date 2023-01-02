@@ -17,7 +17,7 @@
 package org.apache.rocketmq.client.impl;
 
 public enum CommunicationMode {
-    SYNC,
-    ASYNC,
-    ONEWAY,
+    SYNC, //yangyc 同步
+    ASYNC, //yangyc 异步
+    ONEWAY, //yangyc 单向
 }

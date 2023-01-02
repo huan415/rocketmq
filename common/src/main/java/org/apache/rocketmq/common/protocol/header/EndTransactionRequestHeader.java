@@ -24,8 +24,10 @@ import org.apache.rocketmq.remoting.annotation.CFNullable;
 import org.apache.rocketmq.remoting.exception.RemotingCommandException;
 
 public class EndTransactionRequestHeader implements CommandCustomHeader {
+    //yangyc-main 生产者组
     @CFNotNull
     private String producerGroup;
+    //yangyc-main 队列偏移量
     @CFNotNull
     private Long tranStateTableOffset;
     @CFNotNull

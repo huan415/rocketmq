@@ -27,6 +27,7 @@ public interface TransactionListener {
      * @param arg Custom business parameter
      * @return Transaction state
      */
+    //yangyc-main 用途：执行与msg 关联的本地事务逻辑， arg为事务方法的参数
     LocalTransactionState executeLocalTransaction(final Message msg, final Object arg);
 
     /**
@@ -36,5 +37,6 @@ public interface TransactionListener {
      * @param msg Check message
      * @return Transaction state
      */
+    //yangyc-main 用途：根据 broker 传递的 msg 信息查询该 msg 关联的事务状态
     LocalTransactionState checkLocalTransaction(final MessageExt msg);
 }

@@ -56,10 +56,13 @@ public class ClientManageProcessor extends AsyncNettyRequestProcessor implements
         throws RemotingCommandException {
         switch (request.getCode()) {
             case RequestCode.HEART_BEAT:
+                //yangyc 心跳消息
                 return this.heartBeat(ctx, request);
             case RequestCode.UNREGISTER_CLIENT:
+                //yangyc 注销客户端
                 return this.unregisterClient(ctx, request);
             case RequestCode.CHECK_CLIENT_CONFIG:
+                //yangyc 检查客户端配置
                 return this.checkClientConfig(ctx, request);
             default:
                 break;

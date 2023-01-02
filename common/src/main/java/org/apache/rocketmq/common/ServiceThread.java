@@ -26,10 +26,12 @@ public abstract class ServiceThread implements Runnable {
     private static final InternalLogger log = InternalLoggerFactory.getLogger(LoggerName.COMMON_LOGGER_NAME);
 
     private static final long JOIN_TIME = 90 * 1000;
-
+    //yangyc-main 自己的线程
     private Thread thread;
     protected final CountDownLatch2 waitPoint = new CountDownLatch2(1);
+    //yangyc-main false:没有通知   true:有通知
     protected volatile AtomicBoolean hasNotified = new AtomicBoolean(false);
+    //yangyc-main false:运行中   true:关闭
     protected volatile boolean stopped = false;
     protected boolean isDaemon = false;
 
@@ -121,13 +123,16 @@ public abstract class ServiceThread implements Runnable {
     }
 
     public void wakeup() {
+        //yangyc-main CAS 设置 hasNotified 为 true（避免多线程多次调用到 countDown 方法）
         if (hasNotified.compareAndSet(false, true)) {
+            //yangyc-main 唤醒刷盘线程（栅栏上阻塞的线程，其实就是 ServiceThread 自己的线程）
             waitPoint.countDown(); // notify
         }
     }
 
     protected void waitForRunning(long interval) {
         if (hasNotified.compareAndSet(true, false)) {
+            //yangyc-main 有其他线程通知，则直接返回，不再休眠，并设置 hasNotified 为 false
             this.onWaitEnd();
             return;
         }
@@ -136,10 +141,13 @@ public abstract class ServiceThread implements Runnable {
         waitPoint.reset();
 
         try {
+            //yangyc-main 等待一段时间
             waitPoint.await(interval, TimeUnit.MILLISECONDS);
         } catch (InterruptedException e) {
             log.error("Interrupted", e);
         } finally {
+            //yangyc-main 线程恢复运行状态，设置 hasNotified 为 false。
+            // 两种情况：1:等待超时  2.其他线程 wakeup
             hasNotified.set(false);
             this.onWaitEnd();
         }

@@ -25,12 +25,16 @@ import org.apache.rocketmq.remoting.annotation.CFNotNull;
 import org.apache.rocketmq.remoting.exception.RemotingCommandException;
 
 public class PullMessageResponseHeader implements CommandCustomHeader {
+    //yangyc-main 下次 pull 建议使用的 brokerId
     @CFNotNull
     private Long suggestWhichBrokerId;
+    //yangyc-main 下次 pull 的开始偏移量
     @CFNotNull
     private Long nextBeginOffset;
+    //yangyc-main 队列最小偏移量
     @CFNotNull
     private Long minOffset;
+    //yangyc-main 队列最大偏移量
     @CFNotNull
     private Long maxOffset;
 

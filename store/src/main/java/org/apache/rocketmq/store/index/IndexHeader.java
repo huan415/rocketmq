@@ -41,6 +41,7 @@ public class IndexHeader {
         this.byteBuffer = byteBuffer;
     }
 
+    //yangyc-main 依次从 byteBuffer 中读取 header 数据, 赋值到对象字段
     public void load() {
         this.beginTimestamp.set(byteBuffer.getLong(beginTimestampIndex));
         this.endTimestamp.set(byteBuffer.getLong(endTimestampIndex));
@@ -55,6 +56,7 @@ public class IndexHeader {
         }
     }
 
+    //yangyc-main 依次将对象的字段 的瞬时数据写入到 byteBuffer 的指定位置
     public void updateByteBuffer() {
         this.byteBuffer.putLong(beginTimestampIndex, this.beginTimestamp.get());
         this.byteBuffer.putLong(endTimestampIndex, this.endTimestamp.get());
@@ -104,6 +106,7 @@ public class IndexHeader {
         return hashSlotCount;
     }
 
+    //yangyc-main hash 槽计数字段 hashSlotCount 自增, 并且写入 byteBuffer 指定区间
     public void incHashSlotCount() {
         int value = this.hashSlotCount.incrementAndGet();
         this.byteBuffer.putInt(hashSlotcountIndex, value);
@@ -113,6 +116,7 @@ public class IndexHeader {
         return indexCount.get();
     }
 
+    //yangyc-main 索引计数字段 indexCountIndex 自增, 并且写入 byteBuffer 指定区间
     public void incIndexCount() {
         int value = this.indexCount.incrementAndGet();
         this.byteBuffer.putInt(indexCountIndex, value);

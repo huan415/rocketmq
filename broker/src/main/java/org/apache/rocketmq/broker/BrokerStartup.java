@@ -54,13 +54,83 @@ public class BrokerStartup {
     public static String configFile = null;
     public static InternalLogger log;
 
+    //yangyc-main
+    // 1. 创建 BrokerController
+    //     1. 组装几个核心的配置对象。 1.BrokerConfig、2.NettyServerConfig、3.NettyClientConfig、4.MessageStoreConfig
+    //     2. 创建 Controller
+    //     3. 初始化 Controller（controller.initialize()）.
+    //         1. 初始化网络通信组件（remotingServer---向nettyServer注册处理器、fastRemotingServer、各种线程池）
+    //         2. 初始化业务功能组件
+    //             1. messageStore 创建并加载分配策略、加载存储文件
+    //             2. brokerOuterAPI 网络请求组件
+    // 2. 启动 BrokerController
+    //     1. 启动之前初始化的一大堆组件
+    //         1. messageStore 启动核心的消息存储组件
+    //            1.启动一系列服务
+    //                1. reputMessageService 启动分发服务
+    //                2. haService 启动 haService
+    //                3. flushConsumeQueueService 启动消费队列刷盘服务
+    //                4. commitLog 启动 commitLog 模块（主要是启动 commitLog 内容的刷盘服务 flushCommitLogService）
+    //                5. storeStatsService 启动 storeStatsService。
+    //            2. commitLog#topicQueueTable 再次构建队列偏移量字典表
+    //            3. 创建 abort 文件, 正常关机时, JVM HOOK 会删除该文件, 宕机时该文件不会被删除, 恢复阶段根据该文件是否存在, 执行不同的恢复策略
+    //            4. 添加定时任务
+    //                1.  ”清理过期文件“ 定时任务（commitLog、consumeQueue） DefaultMessageStore.this.cleanFilesPeriodically();
+    //                2. ”磁盘预警“ 定时任务 DefaultMessageStore.this.cleanCommitLogService.isSpaceFull();.
+    //                2. DefaultMessageStore.this.checkSelf();
+    //                3. DefaultMessageStore.this.commitLog.getBeginTimeInLock()。
+    //         2. remotingServer 启动 nettyServer
+    //            1.server端和client  有一个定时器 , 每 1s 执行一次，扫描 scanResponseTable 表，将过期的 responseFuture 移除。
+    //         3. fastRemotingServer 启动  快速通道nettyServer
+    //         4. fileWatchService 启动 ssl文件观察服务.
+    //         5. brokerOuterAPI 启动客户端, 往外发送请求
+    //            1. NettyRemotingClient 启动.
+    //         6. pullRequestHoldService 启动 长轮询实现 服务
+    //            1. run() 死循环.
+    //         7. clientHousekeepingService 启动 心跳服务 服务
+    //            1. run() 死循环   ClientHousekeepingService.this.scanExceptionChannel();
+    //         8. filterServerManager 启动 过滤服务器管理器 服务
+    //            1. run() 死循环   FilterServerManager.this.createFilterServer();
+    //         9. brokerFastFailure 启动 快速故障 服务，处理broker发送后长时间未处理的请求.
+    //     2.定时注册心跳 (启动时 + 心跳)。
     public static void main(String[] args) {
         start(createBrokerController(args));
     }
 
+    //yangyc-main. 启动 BrokerController
+    //     1. 启动之前初始化的一大堆组件
+    //         1. messageStore 启动核心的消息存储组件
+    //            1.启动一系列服务
+    //                1. reputMessageService 启动分发服务
+    //                2. haService 启动 haService
+    //                3. flushConsumeQueueService 启动消费队列刷盘服务
+    //                4. commitLog 启动 commitLog 模块（主要是启动 commitLog 内容的刷盘服务 flushCommitLogService）
+    //                5. storeStatsService 启动 storeStatsService。
+    //            2. commitLog#topicQueueTable 再次构建队列偏移量字典表
+    //            3. 创建 abort 文件, 正常关机时, JVM HOOK 会删除该文件, 宕机时该文件不会被删除, 恢复阶段根据该文件是否存在, 执行不同的恢复策略
+    //            4. 添加定时任务
+    //                1.  ”清理过期文件“ 定时任务（commitLog、consumeQueue） DefaultMessageStore.this.cleanFilesPeriodically();
+    //                2. ”磁盘预警“ 定时任务 DefaultMessageStore.this.cleanCommitLogService.isSpaceFull();.
+    //                2. DefaultMessageStore.this.checkSelf();
+    //                3. DefaultMessageStore.this.commitLog.getBeginTimeInLock()。
+    //         2. remotingServer 启动 nettyServer
+    //            1.server端和client  有一个定时器 , 每 1s 执行一次，扫描 scanResponseTable 表，将过期的 responseFuture 移除。
+    //         3. fastRemotingServer 启动  快速通道nettyServer
+    //         4. fileWatchService 启动 ssl文件观察服务.
+    //         5. brokerOuterAPI 启动客户端, 往外发送请求
+    //            1. NettyRemotingClient 启动.
+    //         6. pullRequestHoldService 启动 长轮询实现 服务
+    //            1. run() 死循环.
+    //         7. clientHousekeepingService 启动 心跳服务 服务
+    //            1. run() 死循环   ClientHousekeepingService.this.scanExceptionChannel();
+    //         8. filterServerManager 启动 过滤服务器管理器 服务
+    //            1. run() 死循环   FilterServerManager.this.createFilterServer();
+    //         9. brokerFastFailure 启动 快速故障 服务，处理broker发送后长时间未处理的请求.
+    //     2.定时注册心跳 (启动时 + 心跳)。
     public static BrokerController start(BrokerController controller) {
         try {
 
+            //yangyc-main
             controller.start();
 
             String tip = "The broker[" + controller.getBrokerConfig().getBrokerName() + ", "
@@ -87,7 +157,17 @@ public class BrokerStartup {
         }
     }
 
+    //yangyc-main
+    // 1. 创建 BrokerController
+    //     1. 组装几个核心的配置对象。 1.BrokerConfig、2.NettyServerConfig、3.NettyClientConfig、4.MessageStoreConfig
+    //     2. 创建 Controller
+    //     3. 初始化 Controller（controller.initialize()）.
+    //         1. 初始化网络通信组件（remotingServer---向nettyServer注册处理器、fastRemotingServer、各种线程池）
+    //         2. 初始化业务功能组件
+    //             1. messageStore 创建并加载分配策略、加载存储文件
+    //             2. brokerOuterAPI 网络请求组件
     public static BrokerController createBrokerController(String[] args) {
+        //yangyc-main 组装几个核心的配置对象。 1.BrokerConfig、2.NettyServerConfig、3.NettyClientConfig、4.MessageStoreConfig
         System.setProperty(RemotingCommand.REMOTING_VERSION_KEY, Integer.toString(MQVersion.CURRENT_VERSION));
 
         if (null == System.getProperty(NettySystemConfig.COM_ROCKETMQ_REMOTING_SOCKET_SNDBUF_SIZE)) {
@@ -121,7 +201,7 @@ public class BrokerStartup {
                 messageStoreConfig.setAccessMessageInMemoryMaxRatio(ratio);
             }
 
-            if (commandLine.hasOption('c')) {
+            if (commandLine.hasOption('c')) { //yangyc -c 指定配置文件
                 String file = commandLine.getOptionValue('c');
                 if (file != null) {
                     configFile = file;
@@ -189,7 +269,7 @@ public class BrokerStartup {
             lc.reset();
             configurator.doConfigure(brokerConfig.getRocketmqHome() + "/conf/logback_broker.xml");
 
-            if (commandLine.hasOption('p')) {
+            if (commandLine.hasOption('p')) { //yangyc -p 指定属性
                 InternalLogger console = InternalLoggerFactory.getLogger(LoggerName.BROKER_CONSOLE_NAME);
                 MixAll.printObjectProperties(console, brokerConfig);
                 MixAll.printObjectProperties(console, nettyServerConfig);
@@ -211,6 +291,7 @@ public class BrokerStartup {
             MixAll.printObjectProperties(log, nettyClientConfig);
             MixAll.printObjectProperties(log, messageStoreConfig);
 
+            //yangyc-main 创建 Controller
             final BrokerController controller = new BrokerController(
                 brokerConfig,
                 nettyServerConfig,
@@ -219,12 +300,18 @@ public class BrokerStartup {
             // remember all configs to prevent discard
             controller.getConfiguration().registerConfig(properties);
 
+            //yangyc-main 初始化 Controller
+            // 1. 初始化网络通信组件（remotingServer---向nettyServer注册处理器、fastRemotingServer、各种线程池）
+            // 2. 初始化业务功能组件
+            //    1. messageStore 创建并加载分配策略、加载存储文件
+            //    2. brokerOuterAPI 网络请求组件
             boolean initResult = controller.initialize();
             if (!initResult) {
                 controller.shutdown();
                 System.exit(-3);
             }
 
+            //yangyc-main 服务关闭钩子
             Runtime.getRuntime().addShutdownHook(new Thread(new Runnable() {
                 private volatile boolean hasShutdown = false;
                 private AtomicInteger shutdownTimes = new AtomicInteger(0);

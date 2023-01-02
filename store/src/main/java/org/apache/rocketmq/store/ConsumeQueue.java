@@ -28,20 +28,20 @@ import org.apache.rocketmq.store.config.StorePathConfigHelper;
 public class ConsumeQueue {
     private static final InternalLogger log = InternalLoggerFactory.getLogger(LoggerName.STORE_LOGGER_NAME);
 
-    public static final int CQ_STORE_UNIT_SIZE = 20;
+    public static final int CQ_STORE_UNIT_SIZE = 20; //yangyc CQData 数据单元固定大小：20 byte
     private static final InternalLogger LOG_ERROR = InternalLoggerFactory.getLogger(LoggerName.STORE_ERROR_LOGGER_NAME);
 
-    private final DefaultMessageStore defaultMessageStore;
+    private final DefaultMessageStore defaultMessageStore; //yangyc 存储主模块
 
-    private final MappedFileQueue mappedFileQueue;
-    private final String topic;
-    private final int queueId;
-    private final ByteBuffer byteBufferIndex;
+    private final MappedFileQueue mappedFileQueue; //yangyc ConsumeQueue 队列的文件管理器
+    private final String topic; //yangyc CQ 主题
+    private final int queueId;  //yangyc CQ 队列（每一个队列都有一个 ConsumeQueue 对象管理）
+    private final ByteBuffer byteBufferIndex; //yangyc 临时缓冲区，用途：插入新的 CQData 时使用
 
-    private final String storePath;
-    private final int mappedFileSize;
-    private long maxPhysicOffset = -1;
-    private volatile long minLogicOffset = 0;
+    private final String storePath; //yangyc 目录。例如：../store/consumequeue/xxx_topic/0
+    private final int mappedFileSize; //yangyc 每一个 ConsumeQueue 存储文件大小：默认20*30w
+    private long maxPhysicOffset = -1; //yangyc 当前 ConsumeQueue 存储的最大消息物理偏移量
+    private volatile long minLogicOffset = 0; //yangyc 当前 ConsumeQueue 存储的最小消息物理偏移量
     private ConsumeQueueExt consumeQueueExt = null;
 
     public ConsumeQueue(
@@ -62,7 +62,7 @@ public class ConsumeQueue {
             + File.separator + queueId;
 
         this.mappedFileQueue = new MappedFileQueue(queueDir, mappedFileSize, null);
-
+        //yangyc 申请一个 20字节大小的临时缓冲区
         this.byteBufferIndex = ByteBuffer.allocate(CQ_STORE_UNIT_SIZE);
 
         if (defaultMessageStore.getMessageStoreConfig().isEnableConsumeQueueExt()) {
@@ -75,7 +75,7 @@ public class ConsumeQueue {
             );
         }
     }
-
+    //yangyc ConsumeQueue 启动阶段 第一步:load()
     public boolean load() {
         boolean result = this.mappedFileQueue.load();
         log.info("load consume queue " + this.topic + "-" + this.queueId + " " + (result ? "OK" : "Failed"));
@@ -84,7 +84,7 @@ public class ConsumeQueue {
         }
         return result;
     }
-
+    //yangyc ConsumeQueue 启动阶段 第一步:recover()
     public void recover() {
         final List<MappedFile> mappedFiles = this.mappedFileQueue.getMappedFiles();
         if (!mappedFiles.isEmpty()) {
@@ -220,7 +220,7 @@ public class ConsumeQueue {
         }
         return 0;
     }
-
+    //yangyc commitLog 恢复阶段调用的，作用：将ConsumeQueue有效数据文件与commitLog对齐，将超出部分的数据文件删除。参数：准确无误的最大消息物理偏移量
     public void truncateDirtyLogicFiles(long phyOffet) {
 
         int logicFileSize = this.mappedFileSize;
@@ -375,12 +375,13 @@ public class ConsumeQueue {
     public long getMinOffsetInQueue() {
         return this.minLogicOffset / CQ_STORE_UNIT_SIZE;
     }
-
-    public void putMessagePositionInfoWrapper(DispatchRequest request) {
+    //yangyc 上层 DefaultMessageStore 内部的异步线程调用，存储主模块开启了一个异步构建 ConsumeQueue 文件和索引文件的线程
+    //yangyc 该线程启动后，会持续关注 commitLog 文件，当 commitLog 文件内有新数据写入后，它立马封装成 DispactRequest 对象。转发给 ConsumeQueeu 或者 IndexService
+    public void putMessagePositionInfoWrapper(DispatchRequest request) { //yangyc 参数：类似msg -- 缺少 body
         final int maxRetries = 30;
-        boolean canWrite = this.defaultMessageStore.getRunningFlags().isCQWriteable();
+        boolean canWrite = this.defaultMessageStore.getRunningFlags().isCQWriteable(); //yangyc 获取 consumeQueue 标记位状态，表示ConsumeQueue是否可写
         for (int i = 0; i < maxRetries && canWrite; i++) {
-            long tagsCode = request.getTagsCode();
+            long tagsCode = request.getTagsCode(); //yangyc 获取消息 tagsCode
             if (isExtWriteEnable()) {
                 ConsumeQueueExt.CqExtUnit cqExtUnit = new ConsumeQueueExt.CqExtUnit();
                 cqExtUnit.setFilterBitMap(request.getBitMap());
@@ -395,6 +396,7 @@ public class ConsumeQueue {
                         topic, queueId, request.getCommitLogOffset());
                 }
             }
+            //yangyc 正常返回true。 参数1：消息物理offset；参数2：消息size；参数3：tagsCode；参数4：消息逻辑偏移量（consumeQueue内的偏移量，转换成真实的物理偏移量：逻辑偏移量*20）；
             boolean result = this.putMessagePositionInfo(request.getCommitLogOffset(),
                 request.getMsgSize(), tagsCode, request.getConsumeQueueOffset());
             if (result) {
@@ -402,6 +404,7 @@ public class ConsumeQueue {
                     this.defaultMessageStore.getMessageStoreConfig().isEnableDLegerCommitLog()) {
                     this.defaultMessageStore.getStoreCheckpoint().setPhysicMsgTimestamp(request.getStoreTimestamp());
                 }
+                //yangyc checkPoint 记录最后一条 CQData -> msg.存储时间
                 this.defaultMessageStore.getStoreCheckpoint().setLogicsMsgTimestamp(request.getStoreTimestamp());
                 return;
             } else {
@@ -421,7 +424,7 @@ public class ConsumeQueue {
         log.error("[BUG]consume queue can not write, {} {}", this.topic, this.queueId);
         this.defaultMessageStore.getRunningFlags().makeLogicsQueueError();
     }
-
+    //yangyc 参数1：消息物理offset；参数2：消息size；参数3：tagsCode；参数4：消息逻辑偏移量（consumeQueue内的偏移量，转换成真实的物理偏移量：逻辑偏移量*20）；
     private boolean putMessagePositionInfo(final long offset, final int size, final long tagsCode,
         final long cqOffset) {
 
@@ -432,12 +435,13 @@ public class ConsumeQueue {
 
         this.byteBufferIndex.flip();
         this.byteBufferIndex.limit(CQ_STORE_UNIT_SIZE);
-        this.byteBufferIndex.putLong(offset);
-        this.byteBufferIndex.putInt(size);
-        this.byteBufferIndex.putLong(tagsCode);
-
+        //yangyc 20个字节加入临时缓冲区
+        this.byteBufferIndex.putLong(offset); //yangyc 8字节，物理偏移量
+        this.byteBufferIndex.putInt(size); //yangyc 4字节，消息size
+        this.byteBufferIndex.putLong(tagsCode); //yangyc 8字节，tagsCode
+        //yangyc 计算出逻辑队列的真实物理地址：逻辑偏移量 * 20
         final long expectLogicOffset = cqOffset * CQ_STORE_UNIT_SIZE;
-
+        //yangyc 根据真实物理地址 获取 mappedFile 文件
         MappedFile mappedFile = this.mappedFileQueue.getLastMappedFile(expectLogicOffset);
         if (mappedFile != null) {
 
@@ -470,8 +474,9 @@ public class ConsumeQueue {
                     );
                 }
             }
-            this.maxPhysicOffset = offset + size;
-            return mappedFile.appendMessage(this.byteBufferIndex.array());
+            //yangyc 正常情况：expectLogicOffset == mf.文件名 + mf.wrotePosition
+            this.maxPhysicOffset = offset + size; //yangyc 赋值新值：当前消息物理偏移量 + 消息大小
+            return mappedFile.appendMessage(this.byteBufferIndex.array()); //yangyc 将CQData数据追加到 mf 文件内
         }
         return false;
     }
@@ -559,7 +564,7 @@ public class ConsumeQueue {
     }
 
     public long getMaxOffsetInQueue() {
-        return this.mappedFileQueue.getMaxOffset() / CQ_STORE_UNIT_SIZE;
+        return this.mappedFileQueue.getMaxOffset() / CQ_STORE_UNIT_SIZE;  //yangyc 除以20
     }
 
     public void checkSelf() {

@@ -197,15 +197,20 @@ public class TransactionalMessageBridge {
     }
 
     public CompletableFuture<PutMessageResult> asyncPutHalfMessage(MessageExtBrokerInner messageInner) {
+        //yangyc-main 调用存储模块，将修改后的 msg 存储进 broker (parseHalfMessageInner() 方法修改主题和队列，并保存原主题和队列)
         return store.asyncPutMessage(parseHalfMessageInner(messageInner));
     }
 
+    //yangyc-main
     private MessageExtBrokerInner parseHalfMessageInner(MessageExtBrokerInner msgInner) {
+        //yangyc-main 获取 topic 和 queueId 保存到 properties 中, key:real_topic、real_queueId
         MessageAccessor.putProperty(msgInner, MessageConst.PROPERTY_REAL_TOPIC, msgInner.getTopic());
         MessageAccessor.putProperty(msgInner, MessageConst.PROPERTY_REAL_QUEUE_ID,
             String.valueOf(msgInner.getQueueId()));
+        //yangyc-main 修改消息 sysFlag 为 “非事务消息” 状态
         msgInner.setSysFlag(
             MessageSysFlag.resetTransactionValue(msgInner.getSysFlag(), MessageSysFlag.TRANSACTION_NOT_TYPE));
+        //yangyc-main 修改消息 topic 和 queueId 分别为 “半消息主题” 、 “0号队列”
         msgInner.setTopic(TransactionalMessageUtil.buildHalfTopic());
         msgInner.setQueueId(0);
         msgInner.setPropertiesString(MessageDecoder.messageProperties2String(msgInner.getProperties()));

@@ -60,6 +60,7 @@ import org.apache.rocketmq.remoting.exception.RemotingException;
  * <strong>Thread Safety:</strong> After initialization, the instance can be regarded as thread-safe.
  * </p>
  */
+//yangyc-main 暴露给用户使用的消费者门面
 public class DefaultMQPushConsumer extends ClientConfig implements MQPushConsumer {
 
     private final InternalLogger log = ClientLogger.getLog();
@@ -67,6 +68,7 @@ public class DefaultMQPushConsumer extends ClientConfig implements MQPushConsume
     /**
      * Internal implementation. Most of the functions herein are delegated to it.
      */
+    //yangyc 消费者实现对象
     protected final transient DefaultMQPushConsumerImpl defaultMQPushConsumerImpl;
 
     /**
@@ -76,6 +78,7 @@ public class DefaultMQPushConsumer extends ClientConfig implements MQPushConsume
      *
      * See <a href="http://rocketmq.apache.org/docs/core-concept/">here</a> for further discussion.
      */
+    //yangyc 消费者组名
     private String consumerGroup;
 
     /**
@@ -90,6 +93,7 @@ public class DefaultMQPushConsumer extends ClientConfig implements MQPushConsume
      *
      * This field defaults to clustering.
      */
+    //yangyc 消费模式：集群模式、广播默认。默认：集群模式
     private MessageModel messageModel = MessageModel.CLUSTERING;
 
     /**
@@ -123,6 +127,7 @@ public class DefaultMQPushConsumer extends ClientConfig implements MQPushConsume
      * </li>
      * </ul>
      */
+    //yangyc 当从 broker 获取当前组内，该 queue 的 offset 不存在时，consumeFromWhere 才有效。默认：CONSUME_FROM_LAST_OFFSET，表示队列的最后offset开始消费
     private ConsumeFromWhere consumeFromWhere = ConsumeFromWhere.CONSUME_FROM_LAST_OFFSET;
 
     /**
@@ -131,52 +136,62 @@ public class DefaultMQPushConsumer extends ClientConfig implements MQPushConsume
      * Implying Seventeen twelve and 01 seconds on December 23, 2013 year<br>
      * Default backtracking consumption time Half an hour ago.
      */
+    //yangyc 当 ConsumeFromWhere 配置的是 CONSUME_FROM_TIMESTAMP、并且服务器不存在group内该queue的offset时，才会使用该时间戳。  值：消费者创建时间-30s => 转换成格式：年月日时分秒
     private String consumeTimestamp = UtilAll.timeMillisToHumanString3(System.currentTimeMillis() - (1000 * 60 * 30));
 
     /**
      * Queue allocation algorithm specifying how message queues are allocated to each consumer clients.
      */
+    //yangyc 主题下，队列的分配策略。负载均衡程序使用, reblanceImpl 对象依赖该算法
     private AllocateMessageQueueStrategy allocateMessageQueueStrategy;
 
     /**
      * Subscription relationship
      */
+    //yangyc 订阅信息集合。key:主题。 value:过滤表达式（一般都是 tag）
     private Map<String /* topic */, String /* sub expression */> subscription = new HashMap<String, String>();
 
     /**
      * Message listener
      */
+    //yangyc 消息监听器。消息处理逻辑全部由他实现。 有两种接口：1.MessageListenerConcurrently； 2.MessageListenerOrderly
     private MessageListener messageListener;
 
     /**
      * Offset Storage
      */
+    //yangyc 消费者本地消费进度存储（一般这里都是 RemoteBrokerOffsetStore）
     private OffsetStore offsetStore;
 
     /**
      * Minimum consumer thread number
      */
+    //yangyc 消费服务线程池线程数最小值，默认：20
     private int consumeThreadMin = 20;
 
     /**
      * Max consumer thread number
      */
+    //yangyc 消费服务线程池线程数最大值，默认：20
     private int consumeThreadMax = 20;
 
     /**
      * Threshold for dynamic adjustment of the number of thread pool
      */
+    //yangyc 该参数已经作废了
     private long adjustThreadPoolNumsThreshold = 100000;
 
     /**
      * Concurrently max span offset.it has no effect on sequential consumption
      */
+    //yangyc 本地队列快照（processQueue）中，第一条和最后一条消息，它俩之间offset跨度不能超过 2000（流控使用）
     private int consumeConcurrentlyMaxSpan = 2000;
 
     /**
      * Flow control threshold on queue level, each message queue will cache at most 1000 messages by default,
      * Consider the {@code pullBatchSize}, the instantaneous value may exceed the limit
      */
+    //yangyc 本地队列快照（processQueue）中，消息数量限制（队列流控使用）
     private int pullThresholdForQueue = 1000;
 
     /**
@@ -186,6 +201,7 @@ public class DefaultMQPushConsumer extends ClientConfig implements MQPushConsume
      * <p>
      * The size of a message only measured by message body, so it's not accurate
      */
+    //yangyc 本地队列快照（processQueue）中，消息总 size 不能超过100（队列流控使用）
     private int pullThresholdSizeForQueue = 100;
 
     /**
@@ -197,6 +213,7 @@ public class DefaultMQPushConsumer extends ClientConfig implements MQPushConsume
      * For example, if the value of pullThresholdForTopic is 1000 and 10 message queues are assigned to this consumer,
      * then pullThresholdForQueue will be set to 100
      */
+    //yangyc 消费者消费的指定主题的所有消息，在本地不能超过“pullThresholdForTopic”的值（主题流控使用）。 -1:表示不限制
     private int pullThresholdForTopic = -1;
 
     /**
@@ -208,26 +225,31 @@ public class DefaultMQPushConsumer extends ClientConfig implements MQPushConsume
      * For example, if the value of pullThresholdSizeForTopic is 1000 MiB and 10 message queues are
      * assigned to this consumer, then pullThresholdSizeForQueue will be set to 100 MiB
      */
+    //yangyc 消费者消费的指定主题的所有消息，在本地不能超过“pullThresholdSizeForTopic”mib（主题流控使用）。 -1:表示不限制
     private int pullThresholdSizeForTopic = -1;
 
     /**
      * Message pull Interval
      */
+    //yangyc 消费者两次拉起请求的时间间隔
     private long pullInterval = 0;
 
     /**
      * Batch consumption size
      */
+    //yangyc 消费任务最多可消费的消息数量，默认：1 每一个消息任务只消费一条消息
     private int consumeMessageBatchMaxSize = 1;
 
     /**
      * Batch pull size
      */
+    //yangyc 一次拉请求，最多可以从服务器拉取的消息数量
     private int pullBatchSize = 32;
 
     /**
      * Whether update subscription relationship when every pull
      */
+    //yangyc 拉请求时，是否提交本地“订阅数据（过滤信息）”，默认不提交（因为心跳时，订阅数据已经同步到broker上了，没必要再提交）
     private boolean postSubscriptionWhenPull = false;
 
     /**
@@ -242,6 +264,7 @@ public class DefaultMQPushConsumer extends ClientConfig implements MQPushConsume
      * If messages are re-consumed more than {@link #maxReconsumeTimes} before success, it's be directed to a deletion
      * queue waiting.
      */
+    //yangyc 消息最大重试次数。默认：-1（表示重试16次）
     private int maxReconsumeTimes = -1;
 
     /**
@@ -252,6 +275,7 @@ public class DefaultMQPushConsumer extends ClientConfig implements MQPushConsume
     /**
      * Maximum amount of time in minutes a message may block the consuming thread.
      */
+    //yangyc 消费者本地如果某条消息 15min 还未被消费，则需要回退该消息
     private long consumeTimeout = 15;
 
     /**
@@ -692,12 +716,39 @@ public class DefaultMQPushConsumer extends ClientConfig implements MQPushConsume
      *
      * @throws MQClientException if there is any client error.
      */
+    //yangyc-main 启动过程不用太过关注，有个概念就行，然后客户端启动的核心是mQClientFactory 主要是启动了一大堆的服务
+    //yangyc-main
+    // 1. 启动 消息轨迹相关
+    // 2. defaultMQPushConsumerImpl 启动消费者实现对象
+    //    1. 拷贝“订阅信息”, 从门面对象 subscription 拷贝到 ReblanceImpl 对象
+    //    2. 初始化 RebalanceImpl 对象, 设置消费者组、消费模式、队列分配策略、客户端实例
+    //    3. pullAPIWrapper 创建&初始化 拉消息API对象（内部封装了查询推荐主机算法）
+    //    4. offsetStore 创建 offsetStore 对象（集群模式：RemoteBrokerOffsetStore）, 并且回写到门面实例
+    //    5. ConsumeMessageService 创建 ConsumeMessageService 实例 -- 并发消费（ConsumeMessageConcurrentlyService）、顺序消费（ConsumeMessageOrderlyService）
+    //    6. 启动消费服务 onsumeMessageService.start()
+    //        1. 内部向 cleanExpireMsgExecutors 提交了清理过期消息的定时任务, 15min执行一次。
+    //        2. 顺序消费  向调度任务线程池提交 “锁续约任务”。每20s向broker续约当前消费者占用的锁 onsumeMessageOrderlyService.this.lockMQPeriodically();.
+    //    7. 启动客户端实例 mQClientFactory.start().
+    //        1. mQClientAPIImpl 启用客户端网络层入口
+    //            1. remotingClient 启用客户端网络层入口.
+    //        2. pullMessageService 拉消息服务
+    //            1. run() 死循环。
+    //        3. rebalanceService 负载均衡服务
+    //            1. run() 死循环.
+    //        4. defaultMQProducer 启动内部生产者对象，消息回退时使用
+    //        5.启动定时任务入口
+    //            1. 定时任务1：每30s, 从 nameserver 更新客户端本地的路由数据
+    //            2. 定时任务2：每30s, 两个事情：事1. 清理下线的 broker 数据。事2.向在线的 broker 发送心跳
+    //            3. 定时任务3：每5s, 消费者持久化消费进度
+    //            4  定时任务4：每1min, 动态调整消费组线程池。
+    //    8. 定时任务处理 回执太慢 的情况.
     @Override
     public void start() throws MQClientException {
         setConsumerGroup(NamespaceUtil.wrapNamespace(this.getNamespace(), this.consumerGroup));
         this.defaultMQPushConsumerImpl.start();
         if (null != traceDispatcher) {
             try {
+                //yangyc 消息轨迹相关
                 traceDispatcher.start(this.getNamesrvAddr(), this.getAccessChannel());
             } catch (MQClientException e) {
                 log.warn("trace dispatcher start failed ", e);

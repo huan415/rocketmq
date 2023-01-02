@@ -42,32 +42,32 @@ import org.apache.rocketmq.store.util.LibC;
 import sun.nio.ch.DirectBuffer;
 
 public class MappedFile extends ReferenceResource {
-    public static final int OS_PAGE_SIZE = 1024 * 4;
+    public static final int OS_PAGE_SIZE = 1024 * 4; //yangyc 内存页大小，默认 4K
     protected static final InternalLogger log = InternalLoggerFactory.getLogger(LoggerName.STORE_LOGGER_NAME);
-
+    //yangyc 当前进程下，所有的 mappedFile 占用的总虚拟内存大小
     private static final AtomicLong TOTAL_MAPPED_VIRTUAL_MEMORY = new AtomicLong(0);
-
+    //yangyc 当前进程下，所有的 mappedFile 个数
     private static final AtomicInteger TOTAL_MAPPED_FILES = new AtomicInteger(0);
-    protected final AtomicInteger wrotePosition = new AtomicInteger(0);
+    protected final AtomicInteger wrotePosition = new AtomicInteger(0); //yangyc 当前 mappedFile 数据写入点
     protected final AtomicInteger committedPosition = new AtomicInteger(0);
-    private final AtomicInteger flushedPosition = new AtomicInteger(0);
-    protected int fileSize;
-    protected FileChannel fileChannel;
+    private final AtomicInteger flushedPosition = new AtomicInteger(0); //yangyc 当前 mappedFile 数据落盘点（flushedPosition之前是安全数据。flushedPosition-wrotePosition之间是脏页）
+    protected int fileSize; //yangyc 文件大小
+    protected FileChannel fileChannel; //yangyc 文件通道
     /**
      * Message will put to here first, and then reput to FileChannel if writeBuffer is not null.
      */
     protected ByteBuffer writeBuffer = null;
     protected TransientStorePool transientStorePool = null;
-    private String fileName;
-    private long fileFromOffset;
-    private File file;
-    private MappedByteBuffer mappedByteBuffer;
-    private volatile long storeTimestamp = 0;
-    private boolean firstCreateInQueue = false;
+    private String fileName; //yangyc 文件名（commitLog/ConsumeQueue文件名:第一条消息的物理偏移量；indexFile文件名：年月日时分秒）
+    private long fileFromOffset; //yangyc 文件名转 long
+    private File file; //yangyc 文件对象
+    private MappedByteBuffer mappedByteBuffer; //yangyc 内存映射缓冲区，访问虚拟内存
+    private volatile long storeTimestamp = 0; //yangyc 该文件下保存第一条消息的存储时间
+    private boolean firstCreateInQueue = false; //yangyc 当前文件如果是 目录内有效文件的首文件的话，该值就为 true
 
     public MappedFile() {
     }
-
+    //yangyc 参数1：文件名称（绝对路径文件名） 参数2：文件大小
     public MappedFile(final String fileName, final int fileSize) throws IOException {
         init(fileName, fileSize);
     }
@@ -147,19 +147,19 @@ public class MappedFile extends ReferenceResource {
         this.writeBuffer = transientStorePool.borrowBuffer();
         this.transientStorePool = transientStorePool;
     }
-
+    //yangyc 参数1：文件名称（绝对路径文件名） 参数2：文件大小
     private void init(final String fileName, final int fileSize) throws IOException {
         this.fileName = fileName;
         this.fileSize = fileSize;
-        this.file = new File(fileName);
-        this.fileFromOffset = Long.parseLong(this.file.getName());
+        this.file = new File(fileName); //yangyc 创建文件对象
+        this.fileFromOffset = Long.parseLong(this.file.getName()); //yangyc 文件名转 long
         boolean ok = false;
 
-        ensureDirOK(this.file.getParent());
+        ensureDirOK(this.file.getParent()); //yangyc 文件目录不存在则创建
 
         try {
-            this.fileChannel = new RandomAccessFile(this.file, "rw").getChannel();
-            this.mappedByteBuffer = this.fileChannel.map(MapMode.READ_WRITE, 0, fileSize);
+            this.fileChannel = new RandomAccessFile(this.file, "rw").getChannel(); //yangyc 创建文件通道（JDK NIO）
+            this.mappedByteBuffer = this.fileChannel.map(MapMode.READ_WRITE, 0, fileSize); //yangyc 获取文件内存映射缓冲区
             TOTAL_MAPPED_VIRTUAL_MEMORY.addAndGet(fileSize);
             TOTAL_MAPPED_FILES.incrementAndGet();
             ok = true;
@@ -187,7 +187,7 @@ public class MappedFile extends ReferenceResource {
     public FileChannel getFileChannel() {
         return fileChannel;
     }
-
+    //yangyc 参数1：msg，参数2：追加消息回调（消息具体需要哪些个字段 需要追加到文件中，都由它控制）
     public AppendMessageResult appendMessage(final MessageExtBrokerInner msg, final AppendMessageCallback cb) {
         return appendMessagesInner(msg, cb);
     }
@@ -195,25 +195,30 @@ public class MappedFile extends ReferenceResource {
     public AppendMessageResult appendMessages(final MessageExtBatch messageExtBatch, final AppendMessageCallback cb) {
         return appendMessagesInner(messageExtBatch, cb);
     }
-
+    //yangyc 参数1：msg，参数2：追加消息回调（消息具体需要哪些个字段 需要追加到文件中，都由它控制）
     public AppendMessageResult appendMessagesInner(final MessageExt messageExt, final AppendMessageCallback cb) {
         assert messageExt != null;
         assert cb != null;
 
-        int currentPos = this.wrotePosition.get();
+        int currentPos = this.wrotePosition.get(); //yangyc 当前内存映射文件的写入位点
 
-        if (currentPos < this.fileSize) {
+        if (currentPos < this.fileSize) { //yangyc 条件成立：说明文件还可以继续写
+            //yangyc 使用内存映射 buffer 创建切片
             ByteBuffer byteBuffer = writeBuffer != null ? writeBuffer.slice() : this.mappedByteBuffer.slice();
+            //yangyc 将切片 byteBuffer 的 pos 设置为数据写入位点
             byteBuffer.position(currentPos);
             AppendMessageResult result;
             if (messageExt instanceof MessageExtBrokerInner) {
+                //yangyc 向内存映射追加数据
                 result = cb.doAppend(this.getFileFromOffset(), byteBuffer, this.fileSize - currentPos, (MessageExtBrokerInner) messageExt);
             } else if (messageExt instanceof MessageExtBatch) {
                 result = cb.doAppend(this.getFileFromOffset(), byteBuffer, this.fileSize - currentPos, (MessageExtBatch) messageExt);
             } else {
                 return new AppendMessageResult(AppendMessageStatus.UNKNOWN_ERROR);
             }
+            //yangyc 更新数据写入位点（加上刚刚写入的数据量）
             this.wrotePosition.addAndGet(result.getWroteBytes());
+            //yangyc 保存最后一条消息的存储时间
             this.storeTimestamp = result.getStoreTimestamp();
             return result;
         }
@@ -224,7 +229,7 @@ public class MappedFile extends ReferenceResource {
     public long getFileFromOffset() {
         return this.fileFromOffset;
     }
-
+    //yangyc 参数：需要写入到文件的字节数组。返回参数：true:写入成功，false:写入失败
     public boolean appendMessage(final byte[] data) {
         int currentPos = this.wrotePosition.get();
 
@@ -268,30 +273,31 @@ public class MappedFile extends ReferenceResource {
     /**
      * @return The current flushed position
      */
+    //yangyc-main 刷盘的最小页数（等于0时，属于强制刷盘，大于0时，需要刷脏页数据，达到 flushLeastPages 才进行物理刷盘）
     public int flush(final int flushLeastPages) {
         if (this.isAbleToFlush(flushLeastPages)) {
-            if (this.hold()) {
-                int value = getReadPosition();
+            if (this.hold()) { //yangyc 引用计数自增，保证刷盘过程中，不会释放资源
+                int value = getReadPosition(); //yangyc 数据写入位点
 
                 try {
                     //We only append data to fileChannel or mappedByteBuffer, never both.
                     if (writeBuffer != null || this.fileChannel.position() != 0) {
                         this.fileChannel.force(false);
                     } else {
-                        this.mappedByteBuffer.force();
+                        this.mappedByteBuffer.force(); //yangyc 落盘
                     }
                 } catch (Throwable e) {
                     log.error("Error occurred when force data to disk.", e);
                 }
 
-                this.flushedPosition.set(value);
-                this.release();
+                this.flushedPosition.set(value); //yangyc 将数据写入位点 赋值给刷盘点
+                this.release(); //yangyc 引用计数 - 1
             } else {
                 log.warn("in flush, hold failed, flush offset = " + this.flushedPosition.get());
                 this.flushedPosition.set(getReadPosition());
             }
         }
-        return this.getFlushedPosition();
+        return this.getFlushedPosition(); //yangyc 返回最新的刷盘位点
     }
 
     public int commit(final int commitLeastPages) {
@@ -334,20 +340,20 @@ public class MappedFile extends ReferenceResource {
             }
         }
     }
-
+    //yangyc 刷盘的最小页数（等于0时，属于强制刷盘，大于0时，需要刷脏页数据，达到 flushLeastPages 才进行物理刷盘）
     private boolean isAbleToFlush(final int flushLeastPages) {
-        int flush = this.flushedPosition.get();
-        int write = getReadPosition();
+        int flush = this.flushedPosition.get(); //yangyc 获取当前刷盘位点
+        int write = getReadPosition(); //yangyc 获取当前写入位点
 
-        if (this.isFull()) {
+        if (this.isFull()) { //yangyc 文件写满。这种情况一定要返回true, 执行刷盘操作
             return true;
         }
 
         if (flushLeastPages > 0) {
             return ((write / OS_PAGE_SIZE) - (flush / OS_PAGE_SIZE)) >= flushLeastPages;
         }
-
-        return write > flush;
+        //yangyc 执行到这里，说明 flushLeastPages == 0
+        return write > flush; //yangyc 只要有脏数据就刷盘
     }
 
     protected boolean isAbleToCommit(final int commitLeastPages) {
@@ -377,6 +383,7 @@ public class MappedFile extends ReferenceResource {
         return this.fileSize == this.wrotePosition.get();
     }
 
+    //yangyc-main 按照 offset 查询单条消息, 并返回 SelectMappedBufferResult（内部有一个 byteBuffer：表示 [offset,offset+size] 区间的 MappedFile 的数据）
     public SelectMappedBufferResult selectMappedBuffer(int pos, int size) {
         int readPosition = getReadPosition();
         if ((pos + size) <= readPosition) {
@@ -397,11 +404,11 @@ public class MappedFile extends ReferenceResource {
 
         return null;
     }
-
+    //yangyc 该方法以 pos 为开始位点，到有效数据为止，创建出一个切片 byteBuffer, 供业务访问数据。参数：数据起始位点
     public SelectMappedBufferResult selectMappedBuffer(int pos) {
-        int readPosition = getReadPosition();
-        if (pos < readPosition && pos >= 0) {
-            if (this.hold()) {
+        int readPosition = getReadPosition(); //yangyc 获取有效数据位点（wrotePosition）
+        if (pos < readPosition && pos >= 0) {//yangyc 条件成立：说明 pos 处于有效数据区间
+            if (this.hold()) { //yangyc 资源引用数据 + 1
                 ByteBuffer byteBuffer = this.mappedByteBuffer.slice();
                 byteBuffer.position(pos);
                 int size = readPosition - pos;
@@ -428,13 +435,13 @@ public class MappedFile extends ReferenceResource {
             return true;
         }
 
-        clean(this.mappedByteBuffer);
+        clean(this.mappedByteBuffer);//yangyc 释放对外内存
         TOTAL_MAPPED_VIRTUAL_MEMORY.addAndGet(this.fileSize * (-1));
         TOTAL_MAPPED_FILES.decrementAndGet();
         log.info("unmap file[REF:" + currentRef + "] " + this.fileName + " OK");
         return true;
     }
-
+    //yangyc-main 删除文件
     public boolean destroy(final long intervalForcibly) {
         this.shutdown(intervalForcibly);
 
@@ -480,7 +487,7 @@ public class MappedFile extends ReferenceResource {
     public void setCommittedPosition(int pos) {
         this.committedPosition.set(pos);
     }
-
+    //yangyc 内存映射文件    内存预热
     public void warmMappedFile(FlushDiskType type, int pages) {
         long beginTime = System.currentTimeMillis();
         ByteBuffer byteBuffer = this.mappedByteBuffer.slice();

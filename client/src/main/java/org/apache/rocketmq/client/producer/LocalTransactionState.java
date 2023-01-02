@@ -17,7 +17,10 @@
 package org.apache.rocketmq.client.producer;
 
 public enum LocalTransactionState {
+    //yangyc-main 提交事务
     COMMIT_MESSAGE,
+    //yangyc-main 回滚事务
     ROLLBACK_MESSAGE,
+    //yangyc-main 未知
     UNKNOW,
 }

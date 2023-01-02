@@ -26,24 +26,32 @@ import org.apache.rocketmq.remoting.annotation.CFNullable;
 import org.apache.rocketmq.remoting.exception.RemotingCommandException;
 
 public class SendMessageRequestHeader implements CommandCustomHeader {
+    //yangyc-main 生产者组
     @CFNotNull
     private String producerGroup;
+    //yangyc-main 主题
     @CFNotNull
     private String topic;
     @CFNotNull
     private String defaultTopic;
     @CFNotNull
     private Integer defaultTopicQueueNums;
+    //yangyc-main 队列ID
     @CFNotNull
     private Integer queueId;
+    //yangyc-main 系统参数
     @CFNotNull
     private Integer sysFlag;
+    //yangyc-main 消息诞生时间
     @CFNotNull
     private Long bornTimestamp;
+    //yangyc-main 消息标记
     @CFNotNull
     private Integer flag;
+    //yangyc-main 属性 json 串
     @CFNullable
     private String properties;
+    //yangyc-main 重复消费次数
     @CFNullable
     private Integer reconsumeTimes;
     @CFNullable

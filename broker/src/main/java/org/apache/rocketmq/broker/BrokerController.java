@@ -107,6 +107,8 @@ import org.apache.rocketmq.store.dledger.DLedgerCommitLog;
 import org.apache.rocketmq.store.stats.BrokerStats;
 import org.apache.rocketmq.store.stats.BrokerStatsManager;
 
+//yangyc-main 整个RocketMQ的业务核心，所有消息存储、转发这些最为重要的业务都是在Broker中进行处理的
+// Broker的内部架构，有点类似于JavaWeb开发的MVC架构。有Controller负责响应请求，各种Service组件负责具体业务，然后还有负责消息存盘的功能模块则类似于Dao。
 public class BrokerController {
     private static final InternalLogger log = InternalLoggerFactory.getLogger(LoggerName.BROKER_LOGGER_NAME);
     private static final InternalLogger LOG_PROTECTION = InternalLoggerFactory.getLogger(LoggerName.PROTECTION_LOGGER_NAME);
@@ -115,22 +117,36 @@ public class BrokerController {
     private final NettyServerConfig nettyServerConfig;
     private final NettyClientConfig nettyClientConfig;
     private final MessageStoreConfig messageStoreConfig;
+    //yangyc 维护consumer的offset
     private final ConsumerOffsetManager consumerOffsetManager;
+    //yangyc 消费者管理，配合 消费者id变化监听器使用
     private final ConsumerManager consumerManager;
+    //yangyc 维护消费者的过滤逻辑
     private final ConsumerFilterManager consumerFilterManager;
+    //yangyc 生产者管理器
     private final ProducerManager producerManager;
+    //yangyc 心跳服务
     private final ClientHousekeepingService clientHousekeepingService;
+    //yangyc 处理消费者的拉消息请求
     private final PullMessageProcessor pullMessageProcessor;
+    //yangyc 长轮询实现
     private final PullRequestHoldService pullRequestHoldService;
+    //yangyc 消息到达监听器。配合长轮询实现使用
     private final MessageArrivingListener messageArrivingListener;
+    //yangyc 负责与客户端的通信
     private final Broker2Client broker2Client;
+    //yangyc 消息订阅组管理器
     private final SubscriptionGroupManager subscriptionGroupManager;
+    //yangyc 消费者id变化监听器
     private final ConsumerIdsChangeListener consumerIdsChangeListener;
     private final RebalanceLockManager rebalanceLockManager = new RebalanceLockManager();
+    //yangyc broker提供给外部的api
     private final BrokerOuterAPI brokerOuterAPI;
     private final ScheduledExecutorService scheduledExecutorService = Executors.newSingleThreadScheduledExecutor(new ThreadFactoryImpl(
         "BrokerControllerScheduledThread"));
+    //yangyc 从服务器同步器
     private final SlaveSynchronize slaveSynchronize;
+    //yangyc 一堆Queue
     private final BlockingQueue<Runnable> sendThreadPoolQueue;
     private final BlockingQueue<Runnable> pullThreadPoolQueue;
     private final BlockingQueue<Runnable> replyThreadPoolQueue;
@@ -139,13 +155,18 @@ public class BrokerController {
     private final BlockingQueue<Runnable> heartbeatThreadPoolQueue;
     private final BlockingQueue<Runnable> consumerManagerThreadPoolQueue;
     private final BlockingQueue<Runnable> endTransactionThreadPoolQueue;
+    //yangyc 过滤服务器管理器
     private final FilterServerManager filterServerManager;
+    //yangyc broker状态管理器
     private final BrokerStatsManager brokerStatsManager;
     private final List<SendMessageHook> sendMessageHookList = new ArrayList<SendMessageHook>();
     private final List<ConsumeMessageHook> consumeMessageHookList = new ArrayList<ConsumeMessageHook>();
     private MessageStore messageStore;
+    //yangyc nettyServer
     private RemotingServer remotingServer;
+    //yangyc 快速通道nettyServer
     private RemotingServer fastRemotingServer;
+    //yangyc 维护topic的配置（对 Topic 的各种管理，包括系统 Topic 和业务 Topic）
     private TopicConfigManager topicConfigManager;
     private ExecutorService sendMessageExecutor;
     private ExecutorService pullMessageExecutor;
@@ -159,7 +180,9 @@ public class BrokerController {
     private boolean updateMasterHAServerAddrPeriodically = false;
     private BrokerStats brokerStats;
     private InetSocketAddress storeHost;
+    //yangyc 快速故障
     private BrokerFastFailure brokerFastFailure;
+    //yangyc 配置管理
     private Configuration configuration;
     private FileWatchService fileWatchService;
     private TransactionalMessageCheckService transactionalMessageCheckService;
@@ -178,23 +201,39 @@ public class BrokerController {
         this.nettyServerConfig = nettyServerConfig;
         this.nettyClientConfig = nettyClientConfig;
         this.messageStoreConfig = messageStoreConfig;
+        //yangyc 维护consumer的offset
         this.consumerOffsetManager = new ConsumerOffsetManager(this);
+        //yangyc 维护topic的配置
         this.topicConfigManager = new TopicConfigManager(this);
+        //yangyc 处理消费者的拉消息请求
         this.pullMessageProcessor = new PullMessageProcessor(this);
+        //yangyc 长轮询实现
         this.pullRequestHoldService = new PullRequestHoldService(this);
+        //yangyc 消息到达监听器。配合长轮询实现使用
         this.messageArrivingListener = new NotifyMessageArrivingListener(this.pullRequestHoldService);
+        //yangyc 消费者id变化监听器
         this.consumerIdsChangeListener = new DefaultConsumerIdsChangeListener(this);
+        //yangyc 消费者管理，配合 消费者id变化监听器使用(Broker 与客户端建立了长连接)
         this.consumerManager = new ConsumerManager(this.consumerIdsChangeListener);
+        //yangyc 维护消费者的过滤逻辑
         this.consumerFilterManager = new ConsumerFilterManager(this);
+        //yangyc 生产者管理器。(Broker 与客户端建立了长连接)
         this.producerManager = new ProducerManager();
+        //yangyc 心跳服务
         this.clientHousekeepingService = new ClientHousekeepingService(this);
+        //yangyc 负责与客户端的通信
         this.broker2Client = new Broker2Client(this);
+        //yangyc 消息订阅组管理器
         this.subscriptionGroupManager = new SubscriptionGroupManager(this);
+        //yangyc broker提供给外部的api
         this.brokerOuterAPI = new BrokerOuterAPI(nettyClientConfig);
+        //yangyc 过滤服务器管理器
         this.filterServerManager = new FilterServerManager(this);
 
+        //yangyc 从服务器同步器
         this.slaveSynchronize = new SlaveSynchronize(this);
 
+        //yangyc 一堆Queue
         this.sendThreadPoolQueue = new LinkedBlockingQueue<Runnable>(this.brokerConfig.getSendThreadPoolQueueCapacity());
         this.pullThreadPoolQueue = new LinkedBlockingQueue<Runnable>(this.brokerConfig.getPullThreadPoolQueueCapacity());
         this.replyThreadPoolQueue = new LinkedBlockingQueue<Runnable>(this.brokerConfig.getReplyThreadPoolQueueCapacity());
@@ -204,10 +243,14 @@ public class BrokerController {
         this.heartbeatThreadPoolQueue = new LinkedBlockingQueue<Runnable>(this.brokerConfig.getHeartbeatThreadPoolQueueCapacity());
         this.endTransactionThreadPoolQueue = new LinkedBlockingQueue<Runnable>(this.brokerConfig.getEndTransactionPoolQueueCapacity());
 
+        //yangyc broker状态管理器
         this.brokerStatsManager = new BrokerStatsManager(this.brokerConfig.getBrokerClusterName());
+        //yangyc 本机ip+监听端口
         this.setStoreHost(new InetSocketAddress(this.getBrokerConfig().getBrokerIP1(), this.getNettyServerConfig().getListenPort()));
 
+        //yangyc 快速故障
         this.brokerFastFailure = new BrokerFastFailure(this);
+        //yangyc 配置管理
         this.configuration = new Configuration(
             log,
             BrokerPathConfigHelper.getBrokerConfigPath(),
@@ -231,25 +274,38 @@ public class BrokerController {
         return queryThreadPoolQueue;
     }
 
+    //yangyc-main 初始化 Controller
+    // 1. 初始化网络通信组件（remotingServer---向nettyServer注册处理器、fastRemotingServer、各种线程池）
+    // 2. 初始化业务功能组件
+    //    1. messageStore 创建并加载分配策略、加载存储文件
+    //    2. brokerOuterAPI 网络请求组件
     public boolean initialize() throws CloneNotSupportedException {
+        //yangyc 从rocketmq的根目录加载各自的配置
         boolean result = this.topicConfigManager.load();
 
         result = result && this.consumerOffsetManager.load();
         result = result && this.subscriptionGroupManager.load();
         result = result && this.consumerFilterManager.load();
 
+        //yangyc 加载成功
         if (result) {
             try {
+                //yangyc 消息存储实现类
                 this.messageStore =
                     new DefaultMessageStore(this.messageStoreConfig, this.brokerStatsManager, this.messageArrivingListener,
                         this.brokerConfig);
+                //yangyc 基于DLeger的多副本commitlog
                 if (messageStoreConfig.isEnableDLegerCommitLog()) {
                     DLedgerRoleChangeHandler roleChangeHandler = new DLedgerRoleChangeHandler(this, (DefaultMessageStore) messageStore);
                     ((DLedgerCommitLog)((DefaultMessageStore) messageStore).getCommitLog()).getdLedgerServer().getdLedgerLeaderElector().addRoleChangeHandler(roleChangeHandler);
                 }
+                //yangyc broker状态机
                 this.brokerStats = new BrokerStats((DefaultMessageStore) this.messageStore);
                 //load plugin
+                //yangyc 负责插件的加载
                 MessageStorePluginContext context = new MessageStorePluginContext(messageStoreConfig, brokerStatsManager, messageArrivingListener, brokerConfig);
+                //yangyc 组装插件（插件是提供给外部可以拦截每一个接口方法的执行。每个方法组成了一个责任链）
+                // 需要继承AbstractPluginMessageStore 覆盖其中的方法。然后把类全路径在启动时传入
                 this.messageStore = MessageStoreFactory.build(context, this.messageStore);
                 this.messageStore.getDispatcherList().addFirst(new CommitLogDispatcherCalcBitMap(this.brokerConfig, this.consumerFilterManager));
             } catch (IOException e) {
@@ -261,10 +317,13 @@ public class BrokerController {
         result = result && this.messageStore.load();
 
         if (result) {
+            //yangyc 实例化nettyServer
             this.remotingServer = new NettyRemotingServer(this.nettyServerConfig, this.clientHousekeepingService);
             NettyServerConfig fastConfig = (NettyServerConfig) this.nettyServerConfig.clone();
             fastConfig.setListenPort(nettyServerConfig.getListenPort() - 2);
+            //yangyc 实例化快速通道nettyServer
             this.fastRemotingServer = new NettyRemotingServer(fastConfig, this.clientHousekeepingService);
+            // 一堆线程池
             this.sendMessageExecutor = new BrokerFixedThreadPoolExecutor(
                 this.brokerConfig.getSendMessageThreadPoolNums(),
                 this.brokerConfig.getSendMessageThreadPoolNums(),
@@ -329,10 +388,12 @@ public class BrokerController {
                 Executors.newFixedThreadPool(this.brokerConfig.getConsumerManageThreadPoolNums(), new ThreadFactoryImpl(
                     "ConsumerManageThread_"));
 
+            //yangyc 向nettyServer注册处理器
             this.registerProcessor();
 
             final long initialDelay = UtilAll.computeNextMorningTimeMillis() - System.currentTimeMillis();
             final long period = 1000 * 60 * 60 * 24;
+            //yangyc 持久化配置, 定时打印日志 和 更新nameserver
             this.scheduledExecutorService.scheduleAtFixedRate(new Runnable() {
                 @Override
                 public void run() {
@@ -543,6 +604,7 @@ public class BrokerController {
         }
     }
 
+    //yangyc 向nettyServer注册处理器
     public void registerProcessor() {
         /**
          * SendMessageProcessor
@@ -848,35 +910,58 @@ public class BrokerController {
         return this.brokerConfig.getBrokerIP1() + ":" + this.nettyServerConfig.getListenPort();
     }
 
+    //yangyc-main. 启动 BrokerController
+    //     1. 启动之前初始化的一大堆组件
+    //         1. messageStore 启动核心的消息存储组件
+    //         2. remotingServer 启动 nettyServer
+    //         3. fastRemotingServer 启动 快速通道nettyServer
+    //         4. fileWatchService 启动 ssl文件观察服务
+    //         5. brokerOuterAPI 启动客户端, 往外发送请求
+    //         6. pullRequestHoldService 启动 长轮询实现 服务
+    //         7. clientHousekeepingService 启动 心跳服务 服务
+    //         8. filterServerManager 启动 过滤服务器管理器 服务
+    //         9. brokerFastFailure 启动 快速故障 服务，处理broker发送后长时间未处理的请求.
+    //     2.定时注册心跳 (启动时 + 心跳)。
     public void start() throws Exception {
+
+        //yangyc-main 启动核心的消息存储组件
         if (this.messageStore != null) {
             this.messageStore.start();
         }
 
+        //yangyc-main 启动 nettyServer
         if (this.remotingServer != null) {
             this.remotingServer.start();
         }
 
+        //yangyc-main 启动 快速通道nettyServer
         if (this.fastRemotingServer != null) {
             this.fastRemotingServer.start();
         }
 
+        //yangyc-main 启动 ssl文件观察服务
         if (this.fileWatchService != null) {
             this.fileWatchService.start();
         }
 
+        //yangyc-main 启动客户端, 往外发送请求
+        // 1. NettyClient 注册 Broker 到 NameServer 路由注册中心组件；
+        // 2. 事务状态回查，Producer 的事务消息组件.
         if (this.brokerOuterAPI != null) {
             this.brokerOuterAPI.start();
         }
 
+        //yangyc-main 启动 长轮询实现 服务
         if (this.pullRequestHoldService != null) {
             this.pullRequestHoldService.start();
         }
 
+        //yangyc-main 启动 心跳服务 服务
         if (this.clientHousekeepingService != null) {
             this.clientHousekeepingService.start();
         }
 
+        //yangyc-main 启动 过滤服务器管理器 服务
         if (this.filterServerManager != null) {
             this.filterServerManager.start();
         }
@@ -884,14 +969,17 @@ public class BrokerController {
         if (!messageStoreConfig.isEnableDLegerCommitLog()) {
             startProcessorByHa(messageStoreConfig.getBrokerRole());
             handleSlaveSynchronize(messageStoreConfig.getBrokerRole());
+            //yangyc-main 向 NameServer 注册心跳
             this.registerBrokerAll(true, false, true);
         }
 
+        //yangyc-main 定时注册心跳
         this.scheduledExecutorService.scheduleAtFixedRate(new Runnable() {
 
             @Override
             public void run() {
                 try {
+                    //yangyc-main 路由注册入口
                     BrokerController.this.registerBrokerAll(true, false, brokerConfig.isForceRegister());
                 } catch (Throwable e) {
                     log.error("registerBrokerAll Exception", e);
@@ -899,10 +987,12 @@ public class BrokerController {
             }
         }, 1000 * 10, Math.max(10000, Math.min(brokerConfig.getRegisterNameServerPeriod(), 60000)), TimeUnit.MILLISECONDS);
 
+        //yangyc-main 空启动
         if (this.brokerStatsManager != null) {
             this.brokerStatsManager.start();
         }
 
+        //yangyc-main 处理broker发送后长时间未处理的请求
         if (this.brokerFastFailure != null) {
             this.brokerFastFailure.start();
         }
@@ -928,6 +1018,8 @@ public class BrokerController {
         doRegisterBrokerAll(true, false, topicConfigSerializeWrapper);
     }
 
+    //yangyc-main 启动时，立即向 NameServer 注册心跳； 同时，启动一个线程池，以10s延迟, 默认30s的间隔持续向 NameServer 发送心跳
+    // 最终由 NameServer 服务中的 DefaultRequestProcessor 处理注册到 RouterInfoManager; 然后 NameServer 启动定时任务,扫描不活动的 Broker （具体在 NamesrvController#initialize方法）。
     public synchronized void registerBrokerAll(final boolean checkOrderConfig, boolean oneway, boolean forceRegister) {
         TopicConfigSerializeWrapper topicConfigWrapper = this.getTopicConfigManager().buildTopicConfigSerializeWrapper();
 
@@ -943,17 +1035,20 @@ public class BrokerController {
             topicConfigWrapper.setTopicConfigTable(topicConfigTable);
         }
 
+        //yangyc-main needRegister
         if (forceRegister || needRegister(this.brokerConfig.getBrokerClusterName(),
             this.getBrokerAddr(),
             this.brokerConfig.getBrokerName(),
             this.brokerConfig.getBrokerId(),
             this.brokerConfig.getRegisterBrokerTimeoutMills())) {
+            //yangyc-main
             doRegisterBrokerAll(checkOrderConfig, oneway, topicConfigWrapper);
         }
     }
 
     private void doRegisterBrokerAll(boolean checkOrderConfig, boolean oneway,
         TopicConfigSerializeWrapper topicConfigWrapper) {
+        //yangyc-main 最终处理 -- NameServer 服务的 routeInfoManager
         List<RegisterBrokerResult> registerBrokerResultList = this.brokerOuterAPI.registerBrokerAll(
             this.brokerConfig.getBrokerClusterName(),
             this.getBrokerAddr(),
@@ -989,6 +1084,7 @@ public class BrokerController {
         final int timeoutMills) {
 
         TopicConfigSerializeWrapper topicConfigWrapper = this.getTopicConfigManager().buildTopicConfigSerializeWrapper();
+        //yangyc-main
         List<Boolean> changeList = brokerOuterAPI.needRegister(clusterName, brokerAddr, brokerName, brokerId, topicConfigWrapper, timeoutMills);
         boolean needRegister = false;
         for (Boolean changed : changeList) {

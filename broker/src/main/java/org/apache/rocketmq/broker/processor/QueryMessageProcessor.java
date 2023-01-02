@@ -53,8 +53,10 @@ public class QueryMessageProcessor extends AsyncNettyRequestProcessor implements
         throws RemotingCommandException {
         switch (request.getCode()) {
             case RequestCode.QUERY_MESSAGE:
+                //yangyc 查询消息(所在topic, 需要的 key, 最大数量, 开始偏移量, 结束偏移量)
                 return this.queryMessage(ctx, request);
             case RequestCode.VIEW_MESSAGE_BY_ID:
+                //yangyc 通过消息ID查询消息
                 return this.viewMessageById(ctx, request);
             default:
                 break;

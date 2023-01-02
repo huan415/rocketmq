@@ -18,11 +18,14 @@ package org.apache.rocketmq.client.impl.consumer;
 
 import org.apache.rocketmq.common.message.MessageQueue;
 
+//yangyc-main PullRequest里有messageQueue和processQueue，
+// 其中messageQueue负责拉取消息，拉取到后，将消息存入processQueue，进行处理。
+// 存入后就可以清空messageQueue，继续拉取了。
 public class PullRequest {
-    private String consumerGroup;
-    private MessageQueue messageQueue;
-    private ProcessQueue processQueue;
-    private long nextOffset;
+    private String consumerGroup; //yangyc 消费者组
+    private MessageQueue messageQueue; //yangyc 队列元数据
+    private ProcessQueue processQueue; //yangyc 消费者本地的处理队列(消费者本地的队列快照，从服务器拉取下来的消息要先放到该快照队列内...消费任务 被消费的消息需要从该队列移除)
+    private long nextOffset; //yangyc 本次拉消息请求，使用 offset (服务器端需要根据该 offset 进行定位消息位置，然后才可以获取一批消息)
     private boolean lockedFirst = false;
 
     public boolean isLockedFirst() {

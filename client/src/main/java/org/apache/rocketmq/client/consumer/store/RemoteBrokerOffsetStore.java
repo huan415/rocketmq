@@ -55,6 +55,8 @@ public class RemoteBrokerOffsetStore implements OffsetStore {
     public void load() {
     }
 
+    //yangyc 更新消费者本地的该 mq 的消费进度。
+    // 参数1：mq；参数2：offset(更新值)；参数3：true  表示：新值>旧值才去更新（消费进度不能逆增长）；
     @Override
     public void updateOffset(MessageQueue mq, long offset, boolean increaseOnly) {
         if (mq != null) {
@@ -65,7 +67,7 @@ public class RemoteBrokerOffsetStore implements OffsetStore {
 
             if (null != offsetOld) {
                 if (increaseOnly) {
-                    MixAll.compareAndIncreaseOnly(offsetOld, offset);
+                    MixAll.compareAndIncreaseOnly(offsetOld, offset); //yangyc 新值>旧值才去更新
                 } else {
                     offsetOld.set(offset);
                 }

@@ -83,13 +83,17 @@ public class RebalancePushImpl extends RebalanceImpl {
 
     @Override
     public boolean removeUnnecessaryMessageQueue(MessageQueue mq, ProcessQueue pq) {
+        //yangyc 持久化指定 ”mq“ 的消费进度，到mq归属的broker节点（broker端会根据group维护每个queue的offset）
         this.defaultMQPushConsumerImpl.getOffsetStore().persist(mq);
+        //yangyc 移除当前”mq“的offset (本地)
         this.defaultMQPushConsumerImpl.getOffsetStore().removeOffset(mq);
         if (this.defaultMQPushConsumerImpl.isConsumeOrderly()
             && MessageModel.CLUSTERING.equals(this.defaultMQPushConsumerImpl.messageModel())) {
+            //yangyc 集群模式下，顺序消费会执行该逻辑
             try {
                 if (pq.getLockConsume().tryLock(1000, TimeUnit.MILLISECONDS)) {
                     try {
+                        //yangyc 释放锁，“broker 端的队列锁”
                         return this.unlockDelay(mq, pq);
                     } finally {
                         pq.getLockConsume().unlock();
@@ -114,6 +118,7 @@ public class RebalancePushImpl extends RebalanceImpl {
 
         if (pq.hasTempMessage()) {
             log.info("[{}]unlockDelay, begin {} ", mq.hashCode(), mq);
+            //yangyc 当 pq 内 treeMap 有数据时，延迟20s释放队列分布式锁，这里是确保全局范围内，只有一个消费任务运行中。。。
             this.defaultMQPushConsumerImpl.getmQClientFactory().getScheduledExecutorService().schedule(new Runnable() {
                 @Override
                 public void run() {
@@ -122,6 +127,8 @@ public class RebalancePushImpl extends RebalanceImpl {
                 }
             }, UNLOCK_DELAY_TIME_MILLS, TimeUnit.MILLISECONDS);
         } else {
+            //yangyc 执行到这里，可以确定当前消费者本地该消费任务已经退出了
+            // 释放分布式锁
             this.unlock(mq, true);
         }
         return true;
